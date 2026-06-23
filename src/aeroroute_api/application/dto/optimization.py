@@ -12,10 +12,16 @@ class OptimizationRequest(BaseModel):
 
 class CandidateResponse(BaseModel):
     path: list[str]
+    geometry: list["RoutePoint"]
     distance_m: float
     time_s: float
     fuel_kg: float
     score: float
+
+
+class RoutePoint(BaseModel):
+    latitude_deg: float
+    longitude_deg: float
 
 
 class OptimizationResponse(BaseModel):
@@ -25,3 +31,12 @@ class OptimizationResponse(BaseModel):
     winner: CandidateResponse | None
     alternatives: list[CandidateResponse]
     solver_termination_reason: str
+
+
+class OptimizationHistoryItem(BaseModel):
+    run_id: str
+    status: str
+    origin_icao: str
+    destination_icao: str
+    aircraft_type: str
+    profile: str

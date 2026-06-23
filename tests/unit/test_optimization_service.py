@@ -1,3 +1,5 @@
+import pytest
+
 from aeroroute_api.application.services.optimization import optimize_still_air
 
 
@@ -16,3 +18,4 @@ def test_optimizer_use_case_delegates_to_versioned_package() -> None:
     assert result.winner is not None
     assert result.winner.path[0].startswith("0:")
     assert result.winner.path[-1].startswith("6:")
+    assert result.winner.geometry[0].latitude_deg == pytest.approx(40.4722)

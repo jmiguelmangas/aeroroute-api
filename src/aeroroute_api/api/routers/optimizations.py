@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aeroroute_api.api.dependencies import database_session
 from aeroroute_api.application.dto.optimization import (
+    OptimizationHistoryItem,
     OptimizationRequest,
     OptimizationResponse,
 )
@@ -14,6 +15,32 @@ from aeroroute_api.infrastructure.db.optimization_runs import (
 )
 
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
+
+
+@router.get("", response_model=list[OptimizationHistoryItem])
+async def list_optimizations(
+    session: AsyncSession = Depends(database_session),
+) -> list[OptimizationHistoryItem]:
+    from aeroroute_api.infrastructure.db.models import OptimizationRun
+
+    runs = (
+        await session.scalars(
+            select(OptimizationRun)
+            .order_by(OptimizationRun.created_at.desc())
+            .limit(20)
+        )
+    ).all()
+    return [
+        OptimizationHistoryItem(
+            run_id=str(run.id),
+            status=run.status,
+            origin_icao=str(run.input_json["origin_icao"]),
+            destination_icao=str(run.input_json["destination_icao"]),
+            aircraft_type=str(run.input_json["aircraft_type"]),
+            profile=str(run.input_json["profile"]),
+        )
+        for run in runs
+    ]
 
 
 @router.post(
