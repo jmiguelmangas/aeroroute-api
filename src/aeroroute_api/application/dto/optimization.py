@@ -19,6 +19,7 @@ class CandidateResponse(BaseModel):
 
 
 class OptimizationResponse(BaseModel):
+    run_id: str | None = None
     status: str
     algorithm_version: str
     winner: CandidateResponse | None

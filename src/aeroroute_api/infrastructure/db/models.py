@@ -15,7 +15,7 @@ from sqlalchemy import (
     String,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgresUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -71,3 +71,40 @@ class Airport(Base):
     location: Mapped[str] = mapped_column(
         Geometry("POINT", srid=4326), nullable=False
     )
+
+
+class OptimizationRun(Base):
+    __tablename__ = "optimization_runs"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    request_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    algorithm_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TrajectoryCandidate(Base):
+    __tablename__ = "trajectory_candidates"
+    __table_args__ = (
+        Index("ix_trajectory_candidates_run_rank", "run_id", "rank"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("optimization_runs.id"),
+        nullable=False,
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    path_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    distance_m: Mapped[float] = mapped_column(nullable=False)
+    time_s: Mapped[float] = mapped_column(nullable=False)
+    fuel_kg: Mapped[float] = mapped_column(nullable=False)
+    score: Mapped[float] = mapped_column(nullable=False)
