@@ -12,6 +12,7 @@ dependencies = [
   "fastapi>=0.115",
   "geoalchemy2>=0.17",
   "greenlet>=3.0",
+  "httpx>=0.28",
   "psycopg[binary]>=3.2",
   "sqlalchemy>=2.0",
   "uvicorn>=0.30"
@@ -21,7 +22,7 @@ dependencies = [
 aeroroute = "aeroroute_api.cli.main:main"
 
 [dependency-groups]
-dev = ["httpx>=0.28", "pytest>=8.0", "ruff>=0.11"]
+dev = ["pytest>=8.0", "ruff>=0.11"]
 
 [tool.ruff]
 line-length = 80

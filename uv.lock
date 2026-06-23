@@ -12,6 +12,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "geoalchemy2" },
     { name = "greenlet" },
+    { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
@@ -19,7 +20,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -31,6 +31,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "geoalchemy2", specifier = ">=0.17" },
     { name = "greenlet", specifier = ">=3.0" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", specifier = ">=0.30" },
@@ -38,7 +39,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.11" },
 ]
