@@ -7,6 +7,7 @@ name = "aeroroute-api"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+  "aeroroute-optimizer>=0.1.0",
   "alembic>=1.16",
   "asyncpg>=0.30",
   "fastapi>=0.115",
@@ -17,6 +18,9 @@ dependencies = [
   "sqlalchemy>=2.0",
   "uvicorn>=0.30"
 ]
+
+[tool.uv.sources]
+aeroroute-optimizer = { path = "../aeroroute-optimizer", editable = true }
 
 [project.scripts]
 aeroroute = "aeroroute_api.cli.main:main"
