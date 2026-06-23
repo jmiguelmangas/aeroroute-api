@@ -14,15 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: aeroroute-api
-      - uses: actions/checkout@v4
-        with:
-          repository: jmiguelmangas/aeroroute-optimizer
-          ref: 5bc033c
-          path: aeroroute-optimizer
+      - name: Check out pinned optimizer dependency
+        run: |
+          git clone --depth 1 https://github.com/jmiguelmangas/aeroroute-optimizer.git ../aeroroute-optimizer
+          git -C ../aeroroute-optimizer checkout 5bc033c6f2809b059fe27e13f617559c5e59e063
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - run: make check
-        working-directory: aeroroute-api
