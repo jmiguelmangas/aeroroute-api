@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aeroroute_api.application.dto.optimization import (
@@ -25,8 +26,16 @@ async def persist_completed_run(
     canonical_request = json.dumps(
         request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
     )
+    request_hash = hashlib.sha256(canonical_request.encode()).hexdigest()
+    existing = await session.scalar(
+        select(OptimizationRun).where(
+            OptimizationRun.request_hash == request_hash
+        )
+    )
+    if existing is not None:
+        return existing
     run = OptimizationRun(
-        request_hash=hashlib.sha256(canonical_request.encode()).hexdigest(),
+        request_hash=request_hash,
         status=response.status,
         algorithm_version=response.algorithm_version,
         input_json=request.model_dump(mode="json"),

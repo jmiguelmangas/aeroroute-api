@@ -11,6 +11,9 @@ from geoalchemy2.elements import WKTElement
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aeroroute_api.infrastructure.datasets.airport_bundle import (
+    read_airport_bundle,
+)
 from aeroroute_api.infrastructure.db.models import Airport, DatasetSnapshot
 
 
@@ -76,6 +79,61 @@ async def import_airports_csv(
     )
 
 
+async def import_airport_bundle(
+    session: AsyncSession, directory: Path
+) -> ImportSummary:
+    bundle = read_airport_bundle(directory)
+    snapshot = await session.scalar(
+        select(DatasetSnapshot).where(
+            DatasetSnapshot.sha256 == bundle.bundle_sha256
+        )
+    )
+    if snapshot is not None:
+        return ImportSummary(
+            snapshot_id=str(snapshot.id),
+            accepted_rows=snapshot.accepted_rows,
+            rejected_rows=snapshot.rejected_rows,
+            already_imported=True,
+        )
+    valid_rows, invalid_rows = _normalize_bundle_rows(bundle.records)
+    snapshot = DatasetSnapshot(
+        source_name=f"airport-bundle:{bundle.version}",
+        sha256=bundle.bundle_sha256,
+        accepted_rows=len(valid_rows),
+        rejected_rows=bundle.rejected_rows + invalid_rows,
+    )
+    session.add(snapshot)
+    await session.flush()
+    session.add_all(
+        [
+            Airport(
+                snapshot_id=snapshot.id,
+                icao_code=row["ident"],
+                iata_code=row["iata_code"],
+                name=row["name"],
+                municipality=row["municipality"],
+                iso_country=row["iso_country"],
+                airport_type=row["airport_type"],
+                latitude_deg=row["latitude_deg"],
+                longitude_deg=row["longitude_deg"],
+                elevation_ft=row["elevation_ft"],
+                location=WKTElement(
+                    f"POINT({row['longitude_deg']} {row['latitude_deg']})",
+                    srid=4326,
+                ),
+            )
+            for row in valid_rows
+        ]
+    )
+    await session.commit()
+    return ImportSummary(
+        snapshot_id=str(snapshot.id),
+        accepted_rows=len(valid_rows),
+        rejected_rows=bundle.rejected_rows + invalid_rows,
+        already_imported=False,
+    )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -120,6 +178,48 @@ def _parse_rows(path: Path) -> tuple[list[dict[str, object]], int]:
     return valid_rows, rejected_rows
 
 
-def _optional(value: str | None) -> str | None:
-    normalized = (value or "").strip()
+def _normalize_bundle_rows(
+    records: tuple[dict[str, object], ...],
+) -> tuple[list[dict[str, object]], int]:
+    valid_rows: list[dict[str, object]] = []
+    rejected_rows = 0
+    for record in records:
+        try:
+            latitude = float(record["latitude_deg"])
+            longitude = float(record["longitude_deg"])
+            ident = str(record["ident"]).strip()
+            name = str(record["name"]).strip()
+            if (
+                not ident
+                or not name
+                or not -90 <= latitude <= 90
+                or not -180 <= longitude <= 180
+            ):
+                raise ValueError("invalid normalized airport")
+            valid_rows.append(
+                {
+                    "ident": ident,
+                    "iata_code": _optional(record.get("iata_code")),
+                    "name": name,
+                    "municipality": _optional(record.get("municipality")),
+                    "iso_country": _optional(record.get("iso_country")),
+                    "airport_type": str(record.get("airport_type", "")).strip(),
+                    "latitude_deg": latitude,
+                    "longitude_deg": longitude,
+                    "elevation_ft": _integer_or_none(
+                        record.get("elevation_ft")
+                    ),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            rejected_rows += 1
+    return valid_rows, rejected_rows
+
+
+def _optional(value: object) -> str | None:
+    normalized = str(value or "").strip()
     return normalized or None
+
+
+def _integer_or_none(value: object) -> int | None:
+    return int(value) if value is not None else None
