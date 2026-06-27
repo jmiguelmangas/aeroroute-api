@@ -11,10 +11,15 @@ class Settings:
     )
     mlx_service_url: str | None = None
     aircraft_performance_provider: str = "curated"
+    cors_allow_origins: tuple[str, ...] = (
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    )
 
 
 def settings() -> Settings:
     defaults = Settings()
+    configured_origins = os.getenv("CORS_ALLOW_ORIGINS")
     return Settings(
         database_url=os.getenv("DATABASE_URL", defaults.database_url),
         mlx_service_url=os.getenv("MLX_SERVICE_URL", defaults.mlx_service_url),
@@ -22,4 +27,13 @@ def settings() -> Settings:
             "AIRCRAFT_PERFORMANCE_PROVIDER",
             defaults.aircraft_performance_provider,
         ).lower(),
+        cors_allow_origins=(
+            tuple(
+                origin.strip()
+                for origin in configured_origins.split(",")
+                if origin.strip()
+            )
+            if configured_origins is not None
+            else defaults.cors_allow_origins
+        ),
     )
