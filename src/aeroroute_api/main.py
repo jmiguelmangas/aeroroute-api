@@ -40,7 +40,8 @@ def health() -> dict[str, str]:
 
 @app.get("/health/providers")
 def provider_health() -> dict[str, str]:
+    configured = settings()
     return {
-        "weather": "configured",
-        "explanations": "mlx" if settings().mlx_service_url else "template",
+        "weather": configured.weather_provider,
+        "explanations": "mlx" if configured.mlx_service_url else "template",
     }

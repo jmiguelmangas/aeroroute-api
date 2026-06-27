@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 import httpx
@@ -6,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aeroroute_api.api.dependencies import database_session
+from aeroroute_api.api.errors import PublicAPIError
 from aeroroute_api.application.dto.optimization import (
     OptimizationHistoryItem,
     OptimizationRequest,
@@ -15,10 +17,17 @@ from aeroroute_api.application.services.optimization import (
     optimize_still_air,
     optimize_with_weather,
 )
+from aeroroute_api.application.services.execution_guard import (
+    OptimizationCapacityExceeded,
+    OptimizationDeadlineExceeded,
+    OptimizationExecutionGuard,
+)
 from aeroroute_api.config import settings
 from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
 from aeroroute_api.infrastructure.db.optimization_runs import (
-    persist_completed_run,
+    complete_optimization_run,
+    fail_optimization_run,
+    reserve_optimization_run,
 )
 from aeroroute_api.infrastructure.weather.cache import CachedWeatherPort
 from aeroroute_api.infrastructure.weather.open_meteo import (
@@ -28,6 +37,12 @@ from aeroroute_api.infrastructure.weather.open_meteo import (
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
 _weather_client = httpx.AsyncClient(timeout=5.0)
 _weather = CachedWeatherPort(OpenMeteoWeatherClient(_weather_client))
+_limits = settings()
+_execution_guard = OptimizationExecutionGuard(
+    max_concurrent=_limits.optimization_max_concurrent,
+    queue_timeout_s=_limits.optimization_queue_timeout_s,
+    execution_timeout_s=_limits.optimization_deadline_s,
+)
 
 
 @router.get("", response_model=list[OptimizationHistoryItem])
@@ -104,31 +119,70 @@ async def create_optimization(
     origin = by_code[airport_codes[0]]
     destination = by_code[airport_codes[1]]
     configured = settings()
-    if (
-        configured.weather_provider == "open_meteo"
-        and request.departure_time_utc is not None
-    ):
-        response = await optimize_with_weather(
+    reservation = await reserve_optimization_run(session, request)
+    run = reservation.run
+    if not reservation.should_execute:
+        if run.status == "completed" and run.output_json is not None:
+            stored = OptimizationResponse.model_validate(run.output_json)
+            return stored.model_copy(update={"run_id": str(run.id)})
+        raise PublicAPIError(
+            409,
+            "optimization_in_progress",
+            "An identical optimization is already running.",
+        )
+
+    async def execute() -> OptimizationResponse:
+        if (
+            configured.weather_provider == "open_meteo"
+            and request.departure_time_utc is not None
+        ):
+            return await optimize_with_weather(
+                origin.latitude_deg,
+                origin.longitude_deg,
+                destination.latitude_deg,
+                destination.longitude_deg,
+                request.aircraft_type,
+                request.profile,
+                request.departure_time_utc,
+                _weather,
+                configured.aircraft_performance_provider,
+            )
+        return optimize_still_air(
             origin.latitude_deg,
             origin.longitude_deg,
             destination.latitude_deg,
             destination.longitude_deg,
             request.aircraft_type,
             request.profile,
-            request.departure_time_utc,
-            _weather,
             configured.aircraft_performance_provider,
         )
-    else:
-        response = optimize_still_air(
-            origin.latitude_deg,
-            origin.longitude_deg,
-            destination.latitude_deg,
-            destination.longitude_deg,
-            request.aircraft_type,
-            request.profile,
-            configured.aircraft_performance_provider,
-        )
+
+    try:
+        response = await _execution_guard.run(execute)
+    except OptimizationCapacityExceeded as error:
+        await fail_optimization_run(session, run.id, "capacity_exceeded")
+        raise PublicAPIError(
+            429,
+            "optimization_capacity_exceeded",
+            "Optimization capacity is temporarily exhausted.",
+        ) from error
+    except OptimizationDeadlineExceeded as error:
+        await fail_optimization_run(session, run.id, "deadline_exceeded")
+        raise PublicAPIError(
+            504,
+            "optimization_deadline_exceeded",
+            "The optimization exceeded its execution deadline.",
+        ) from error
+    except asyncio.CancelledError:
+        await fail_optimization_run(session, run.id, "request_cancelled")
+        raise
+    except Exception as error:
+        await fail_optimization_run(session, run.id, "optimization_failed")
+        raise PublicAPIError(
+            503,
+            "optimization_failed",
+            "The optimization could not be completed.",
+        ) from error
     response = response.model_copy(update={"request": request})
-    run = await persist_completed_run(session, request, response)
-    return response.model_copy(update={"run_id": str(run.id)})
+    completed = await complete_optimization_run(session, run.id, response)
+    return response.model_copy(update={"run_id": str(completed.id)})

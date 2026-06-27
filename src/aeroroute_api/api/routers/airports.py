@@ -22,10 +22,10 @@ async def search_airports(
         select(Airport)
         .where(
             or_(
-                Airport.icao_code.ilike(pattern),
-                Airport.iata_code.ilike(pattern),
-                Airport.name.ilike(pattern),
-                Airport.municipality.ilike(pattern),
+                Airport.icao_code.ilike(pattern, escape="\\"),
+                Airport.iata_code.ilike(pattern, escape="\\"),
+                Airport.name.ilike(pattern, escape="\\"),
+                Airport.municipality.ilike(pattern, escape="\\"),
             )
         )
         .order_by(Airport.icao_code)

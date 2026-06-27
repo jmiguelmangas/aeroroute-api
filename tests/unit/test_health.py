@@ -35,3 +35,4 @@ def test_provider_health_reports_deterministic_fallback_when_mlx_is_unconfigured
 
     assert response.status_code == 200
     assert response.json()["explanations"] == "template"
+    assert response.json()["weather"] == "still_air"

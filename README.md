@@ -25,6 +25,8 @@ uv run alembic upgrade head
 Revision `0003_run_output_snapshot` adds the complete response snapshot used by
 `GET /api/v1/optimizations/{run_id}`. Runs created before this revision remain
 listed, but do not expose a reconstructable detail until they are recalculated.
+Revision `0004_run_lifecycle` adds explicit `running`, `completed`, and `failed`
+state metadata; existing runs with response snapshots migrate to `completed`.
 
 ## Cruise weather
 

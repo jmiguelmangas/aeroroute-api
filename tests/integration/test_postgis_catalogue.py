@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from aeroroute_api.infrastructure.datasets.airport_importer import (
     import_airports_csv,
 )
-from aeroroute_api.infrastructure.db.models import Airport
+from aeroroute_api.application.dto.optimization import OptimizationRequest
+from aeroroute_api.application.services.optimization import optimize_still_air
+from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
+from aeroroute_api.infrastructure.db.optimization_runs import (
+    complete_optimization_run,
+    reserve_optimization_run,
+)
 
 ASYNC_URL = os.getenv("AEROROUTE_TEST_DATABASE_URL")
 SYNC_URL = os.getenv("AEROROUTE_TEST_DATABASE_SYNC_URL")
@@ -60,6 +66,30 @@ async def test_migrations_import_and_spatial_coordinate_order(
                     ).where(Airport.icao_code == "LEMD")
                 )
             ).one()
+            request = OptimizationRequest(
+                origin_icao="LEMD",
+                destination_icao="KJFK",
+                aircraft_type="A320",
+                profile="minimum_fuel",
+            )
+            response = optimize_still_air(
+                40.4722,
+                -3.5608,
+                40.6413,
+                -73.7781,
+                "A320",
+                "minimum_fuel",
+            ).model_copy(update={"request": request})
+            reservation = await reserve_optimization_run(session, request)
+            running_status = await session.scalar(
+                select(OptimizationRun.status).where(
+                    OptimizationRun.id == reservation.run.id
+                )
+            )
+            await complete_optimization_run(
+                session, reservation.run.id, response
+            )
+            duplicate = await reserve_optimization_run(session, request)
 
         assert first.accepted_rows == 1
         assert first.rejected_rows == 0
@@ -68,6 +98,10 @@ async def test_migrations_import_and_spatial_coordinate_order(
         assert row[0] == "LEMD"
         assert row[1] == pytest.approx(-3.5626)
         assert row[2] == pytest.approx(40.4719)
+        assert running_status == "running"
+        assert duplicate.run.status == "completed"
+        assert not duplicate.should_execute
+        assert duplicate.run.input_json == request.model_dump(mode="json")
     finally:
         await engine.dispose()
         migrate("base")

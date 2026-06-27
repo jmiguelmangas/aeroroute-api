@@ -12,6 +12,9 @@ class Settings:
     mlx_service_url: str | None = None
     aircraft_performance_provider: str = "curated"
     weather_provider: str = "still_air"
+    optimization_max_concurrent: int = 2
+    optimization_queue_timeout_s: float = 0.25
+    optimization_deadline_s: float = 15.0
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -31,6 +34,24 @@ def settings() -> Settings:
         weather_provider=os.getenv(
             "WEATHER_PROVIDER", defaults.weather_provider
         ).lower(),
+        optimization_max_concurrent=int(
+            os.getenv(
+                "OPTIMIZATION_MAX_CONCURRENT",
+                defaults.optimization_max_concurrent,
+            )
+        ),
+        optimization_queue_timeout_s=float(
+            os.getenv(
+                "OPTIMIZATION_QUEUE_TIMEOUT_S",
+                defaults.optimization_queue_timeout_s,
+            )
+        ),
+        optimization_deadline_s=float(
+            os.getenv(
+                "OPTIMIZATION_DEADLINE_S",
+                defaults.optimization_deadline_s,
+            )
+        ),
         cors_allow_origins=(
             tuple(
                 origin.strip()
