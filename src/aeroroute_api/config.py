@@ -10,6 +10,7 @@ class Settings:
         "postgresql+asyncpg://aeroroute:aeroroute@localhost:55432/aeroroute"
     )
     mlx_service_url: str | None = None
+    mlx_timeout_s: float = 10.0
     aircraft_performance_provider: str = "curated"
     weather_provider: str = "still_air"
     optimization_max_concurrent: int = 2
@@ -27,6 +28,7 @@ def settings() -> Settings:
     return Settings(
         database_url=os.getenv("DATABASE_URL", defaults.database_url),
         mlx_service_url=os.getenv("MLX_SERVICE_URL", defaults.mlx_service_url),
+        mlx_timeout_s=float(os.getenv("MLX_TIMEOUT_S", defaults.mlx_timeout_s)),
         aircraft_performance_provider=os.getenv(
             "AIRCRAFT_PERFORMANCE_PROVIDER",
             defaults.aircraft_performance_provider,

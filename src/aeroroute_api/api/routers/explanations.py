@@ -49,13 +49,13 @@ async def get_explanation(
     if mlx_url is None:
         response = fallback
     else:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(
+            timeout=settings().mlx_timeout_s
+        ) as client:
             response = await prefer_mlx_or_fallback(
                 MlxExplanationClient(client, mlx_url),
                 fallback,
                 allowed_numeric_values(facts),
             )
-    stored = await persist_explanation(
-        session, run_id, response, facts
-    )
+    stored = await persist_explanation(session, run_id, response, facts)
     return explanation_response(stored)
