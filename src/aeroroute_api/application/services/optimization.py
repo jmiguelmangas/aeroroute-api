@@ -129,7 +129,8 @@ def optimize_still_air(
             f"{performance.provenance.provider} "
             f"{performance.provenance.version}",
             "Initial mass includes payload, modeled trip fuel, and a fixed "
-            "3,000 kg reserve used only as a mass assumption",
+            f"{problem.mass_assumption_fuel_kg:,.0f} kg reserve used only "
+            "as a mass assumption",
             "Cruise levels restricted to FL328 and FL361",
             "Synthetic corridor with 100 km lateral offsets",
             "Climb and descent use fixed estimates and are not optimized",

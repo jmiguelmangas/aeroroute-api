@@ -8,7 +8,7 @@ class OptimizationRequest(BaseModel):
     origin_icao: str = Field(min_length=3, max_length=8)
     destination_icao: str = Field(min_length=3, max_length=8)
     departure_time_utc: datetime | None = None
-    aircraft_type: Literal["A320", "B738"]
+    aircraft_type: Literal["A320", "B738", "B77W", "B788", "A359", "A388"]
     profile: Literal["minimum_fuel", "minimum_time", "balanced"] = "balanced"
 
 
