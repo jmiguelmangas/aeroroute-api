@@ -21,6 +21,37 @@ class CandidateResponse(BaseModel):
     score: float
     display_geojson: "GeoJsonGeometry"
     waypoints: list["WaypointDetail"]
+    fuel_breakdown: "FuelBreakdown | None" = None
+    objective_breakdown: "ObjectiveBreakdown | None" = None
+
+
+class FuelBreakdown(BaseModel):
+    modeled_trip_fuel_kg: float
+    cruise_fuel_kg: float
+    fixed_climb_descent_fuel_kg: float
+    mass_assumption_fuel_kg: float
+    reserves_optimized: bool = False
+
+
+class ObjectiveBreakdown(BaseModel):
+    fuel_delta: float
+    time_delta: float
+    route_extension: float
+    fuel_weight: float
+    time_weight: float
+    extension_weight: float
+    fuel_component: float
+    time_component: float
+    extension_component: float
+    total_score: float
+
+
+class FuelIterationSummary(BaseModel):
+    initial_mass_kg: float
+    trip_fuel_kg: float
+    iterations: int
+    converged: bool
+    warning_code: str | None = None
 
 
 class RoutePoint(BaseModel):
@@ -62,6 +93,7 @@ class OptimizationResponse(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     data_quality: list[DataQualityFlag] = Field(default_factory=list)
     request: OptimizationRequest | None = None
+    fuel_iteration: FuelIterationSummary | None = None
 
 
 class OptimizationHistoryItem(BaseModel):

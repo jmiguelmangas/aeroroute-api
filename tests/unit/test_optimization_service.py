@@ -19,7 +19,7 @@ def test_optimizer_use_case_delegates_to_versioned_package() -> None:
     )
 
     assert result.status == "optimal"
-    assert result.algorithm_version == "0.1.0"
+    assert result.algorithm_version == "0.2.0"
     assert result.winner is not None
     assert result.winner.path[0].startswith("0:")
     assert result.winner.path[-1].startswith("6:")
@@ -29,6 +29,18 @@ def test_optimizer_use_case_delegates_to_versioned_package() -> None:
     assert result.winner.waypoints[-1].cumulative_fuel_kg == pytest.approx(
         result.winner.fuel_kg
     )
+    assert result.winner.fuel_breakdown is not None
+    assert not result.winner.fuel_breakdown.reserves_optimized
+    assert result.winner.fuel_breakdown.modeled_trip_fuel_kg == pytest.approx(
+        result.winner.fuel_breakdown.cruise_fuel_kg
+        + result.winner.fuel_breakdown.fixed_climb_descent_fuel_kg
+    )
+    assert result.winner.objective_breakdown is not None
+    assert result.winner.objective_breakdown.total_score == pytest.approx(
+        result.winner.score
+    )
+    assert result.fuel_iteration is not None
+    assert result.fuel_iteration.converged
     assert result.assumptions
     assert {flag.code for flag in result.data_quality} == {
         "PERFORMANCE_CURATED",
