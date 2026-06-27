@@ -1,5 +1,6 @@
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,14 +11,23 @@ from aeroroute_api.application.dto.optimization import (
     OptimizationRequest,
     OptimizationResponse,
 )
-from aeroroute_api.application.services.optimization import optimize_still_air
+from aeroroute_api.application.services.optimization import (
+    optimize_still_air,
+    optimize_with_weather,
+)
 from aeroroute_api.config import settings
 from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
 from aeroroute_api.infrastructure.db.optimization_runs import (
     persist_completed_run,
 )
+from aeroroute_api.infrastructure.weather.cache import CachedWeatherPort
+from aeroroute_api.infrastructure.weather.open_meteo import (
+    OpenMeteoWeatherClient,
+)
 
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
+_weather_client = httpx.AsyncClient(timeout=5.0)
+_weather = CachedWeatherPort(OpenMeteoWeatherClient(_weather_client))
 
 
 @router.get("", response_model=list[OptimizationHistoryItem])
@@ -93,15 +103,32 @@ async def create_optimization(
         )
     origin = by_code[airport_codes[0]]
     destination = by_code[airport_codes[1]]
-    response = optimize_still_air(
-        origin.latitude_deg,
-        origin.longitude_deg,
-        destination.latitude_deg,
-        destination.longitude_deg,
-        request.aircraft_type,
-        request.profile,
-        settings().aircraft_performance_provider,
-    )
+    configured = settings()
+    if (
+        configured.weather_provider == "open_meteo"
+        and request.departure_time_utc is not None
+    ):
+        response = await optimize_with_weather(
+            origin.latitude_deg,
+            origin.longitude_deg,
+            destination.latitude_deg,
+            destination.longitude_deg,
+            request.aircraft_type,
+            request.profile,
+            request.departure_time_utc,
+            _weather,
+            configured.aircraft_performance_provider,
+        )
+    else:
+        response = optimize_still_air(
+            origin.latitude_deg,
+            origin.longitude_deg,
+            destination.latitude_deg,
+            destination.longitude_deg,
+            request.aircraft_type,
+            request.profile,
+            configured.aircraft_performance_provider,
+        )
     response = response.model_copy(update={"request": request})
     run = await persist_completed_run(session, request, response)
     return response.model_copy(update={"run_id": str(run.id)})

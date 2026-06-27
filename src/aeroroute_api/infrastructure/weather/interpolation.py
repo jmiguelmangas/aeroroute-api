@@ -34,6 +34,8 @@ def interpolate_time(
         valid_at_utc=target_utc,
         source=f"interpolated:{earlier.source}",
         stale=earlier.stale or later.stale,
+        fetched_at_utc=earlier.fetched_at_utc,
+        model=earlier.model,
     )
 
 
@@ -57,6 +59,8 @@ def interpolate_height(
         valid_at_utc=lower.sample.valid_at_utc,
         source=f"interpolated:{lower.sample.source}",
         stale=lower.sample.stale or upper.sample.stale,
+        fetched_at_utc=lower.sample.fetched_at_utc,
+        model=lower.sample.model,
     )
 
 

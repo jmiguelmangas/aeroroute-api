@@ -24,6 +24,8 @@ class WindSample:
     valid_at_utc: datetime
     source: str
     stale: bool = False
+    fetched_at_utc: datetime | None = None
+    model: str | None = None
 
 
 class WeatherPort(Protocol):

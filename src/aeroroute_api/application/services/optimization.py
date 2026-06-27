@@ -1,5 +1,7 @@
 """Application use case which delegates all route physics to the optimizer."""
 
+from datetime import datetime
+
 from aeroroute_optimizer import public as optimizer
 
 from aeroroute_api.application.dto.optimization import (
@@ -13,6 +15,11 @@ from aeroroute_api.application.dto.optimization import (
     RoutePoint,
     WaypointDetail,
 )
+from aeroroute_api.application.services.weather_snapshot import (
+    WeatherSnapshotError,
+    build_route_weather_snapshot,
+)
+from aeroroute_api.domain.ports import WeatherPort
 
 
 def optimize_still_air(
@@ -23,6 +30,10 @@ def optimize_still_air(
     aircraft_type: str,
     profile: str,
     performance_provider: str = "curated",
+    wind_field: optimizer.LayerWindField | None = None,
+    weather_source: str | None = None,
+    weather_stale: bool = False,
+    weather_fallback: bool = False,
 ) -> OptimizationResponse:
     performance = aircraft_performance(performance_provider)
     optimization = optimizer.optimize_still_air_with_mass_iteration(
@@ -32,6 +43,7 @@ def optimize_still_air(
         aircraft_type,
         (10_000.0, 11_000.0),
         profile=optimizer.OptimizationProfile(profile),
+        wind_field=wind_field,
     )
     problem = optimization.problem
     result = optimization.solver_result
@@ -53,12 +65,31 @@ def optimize_still_air(
             problem.baseline_fuel_kg,
         ),
     )
-    quality_flags = [
-        DataQualityFlag(
-            code="WEATHER_STILL_AIR",
+    if weather_source is not None:
+        weather_flag = DataQualityFlag(
+            code="WEATHER_STALE" if weather_stale else "WEATHER_FORECAST",
+            severity="warning" if weather_stale else "info",
+            message=(
+                f"Cruise winds use {'stale ' if weather_stale else ''}"
+                f"{weather_source} pressure-level data."
+            ),
+        )
+    else:
+        weather_flag = DataQualityFlag(
+            code=(
+                "WEATHER_FALLBACK"
+                if weather_fallback
+                else "WEATHER_STILL_AIR"
+            ),
             severity="warning",
-            message="Live weather is not included in this result.",
-        ),
+            message=(
+                "Weather retrieval failed; still-air fallback was used."
+                if weather_fallback
+                else "Live weather is not included in this result."
+            ),
+        )
+    quality_flags = [
+        weather_flag,
         DataQualityFlag(
             code=f"PERFORMANCE_{performance.provenance.provider.upper()}",
             severity="info",
@@ -89,7 +120,11 @@ def optimize_still_air(
         solver_termination_reason=result.diagnostics.termination_reason,
         baseline=_candidate_response(problem, baseline),
         assumptions=[
-            "Still-air deterministic route model",
+            (
+                f"Pressure-level wind snapshot from {weather_source}"
+                if weather_source
+                else "Still-air deterministic route model"
+            ),
             f"Aircraft performance provider: "
             f"{performance.provenance.provider} "
             f"{performance.provenance.version}",
@@ -107,6 +142,54 @@ def optimize_still_air(
             converged=optimization.fuel_iteration.converged,
             warning_code=optimization.fuel_iteration.warning_code,
         ),
+    )
+
+
+async def optimize_with_weather(
+    origin_latitude_deg: float,
+    origin_longitude_deg: float,
+    destination_latitude_deg: float,
+    destination_longitude_deg: float,
+    aircraft_type: str,
+    profile: str,
+    departure_time_utc: datetime,
+    weather: WeatherPort,
+    performance_provider: str = "curated",
+) -> OptimizationResponse:
+    origin = optimizer.GeoPoint(origin_latitude_deg, origin_longitude_deg)
+    destination = optimizer.GeoPoint(
+        destination_latitude_deg, destination_longitude_deg
+    )
+    try:
+        snapshot = await build_route_weather_snapshot(
+            weather,
+            origin,
+            destination,
+            departure_time_utc,
+            (10_000.0, 11_000.0),
+        )
+    except WeatherSnapshotError:
+        return optimize_still_air(
+            origin_latitude_deg,
+            origin_longitude_deg,
+            destination_latitude_deg,
+            destination_longitude_deg,
+            aircraft_type,
+            profile,
+            performance_provider,
+            weather_fallback=True,
+        )
+    return optimize_still_air(
+        origin_latitude_deg,
+        origin_longitude_deg,
+        destination_latitude_deg,
+        destination_longitude_deg,
+        aircraft_type,
+        profile,
+        performance_provider,
+        wind_field=snapshot.wind_at,
+        weather_source=snapshot.source,
+        weather_stale=snapshot.stale,
     )
 
 
@@ -144,11 +227,13 @@ def _candidate_response(
     cumulative_fuel_kg = 0.0
     waypoints: list[WaypointDetail] = []
     for index, node_id in enumerate(candidate.path):
+        wind_component_kt = None
         if index:
             transition = transitions[(candidate.path[index - 1], node_id)]
             elapsed_time_s += transition.time_s
             cumulative_distance_m += transition.distance_m
             cumulative_fuel_kg += transition.fuel_kg
+            wind_component_kt = transition.tailwind_mps * 1.943844
         node = nodes[node_id]
         waypoints.append(
             WaypointDetail(
@@ -161,6 +246,7 @@ def _candidate_response(
                 cumulative_fuel_kg=cumulative_fuel_kg,
                 estimated_mass_kg=(problem.initial_mass_kg or 65_000.0)
                 - cumulative_fuel_kg,
+                wind_component_kt=wind_component_kt,
             )
         )
     objective = candidate.objective_breakdown

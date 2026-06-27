@@ -11,6 +11,7 @@ class Settings:
     )
     mlx_service_url: str | None = None
     aircraft_performance_provider: str = "curated"
+    weather_provider: str = "still_air"
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -26,6 +27,9 @@ def settings() -> Settings:
         aircraft_performance_provider=os.getenv(
             "AIRCRAFT_PERFORMANCE_PROVIDER",
             defaults.aircraft_performance_provider,
+        ).lower(),
+        weather_provider=os.getenv(
+            "WEATHER_PROVIDER", defaults.weather_provider
         ).lower(),
         cors_allow_origins=(
             tuple(

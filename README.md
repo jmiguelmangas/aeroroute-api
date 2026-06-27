@@ -25,3 +25,12 @@ uv run alembic upgrade head
 Revision `0003_run_output_snapshot` adds the complete response snapshot used by
 `GET /api/v1/optimizations/{run_id}`. Runs created before this revision remain
 listed, but do not expose a reconstructable detail until they are recalculated.
+
+## Cruise weather
+
+Set `WEATHER_PROVIDER=open_meteo` to enable batched pressure-level forecast
+snapshots. The adapter requests 300, 250, and 200 hPa wind and geopotential
+height from the [Open-Meteo Forecast API](https://open-meteo.com/en/docs), then
+interpolates vector components in time and altitude. Provider failures degrade
+explicitly to still-air results. Review Open-Meteo's current attribution and
+usage terms before operating or distributing a hosted deployment.
