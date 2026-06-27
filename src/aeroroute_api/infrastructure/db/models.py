@@ -85,6 +85,7 @@ class OptimizationRun(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     algorithm_version: Mapped[str] = mapped_column(String(32), nullable=False)
     input_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    output_json: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

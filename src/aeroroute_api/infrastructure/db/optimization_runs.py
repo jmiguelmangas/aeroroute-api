@@ -33,12 +33,16 @@ async def persist_completed_run(
         )
     )
     if existing is not None:
+        if existing.output_json is None:
+            existing.output_json = response.model_dump(mode="json")
+            await session.commit()
         return existing
     run = OptimizationRun(
         request_hash=request_hash,
         status=response.status,
         algorithm_version=response.algorithm_version,
         input_json=request.model_dump(mode="json"),
+        output_json=response.model_dump(mode="json"),
     )
     session.add(run)
     await session.flush()

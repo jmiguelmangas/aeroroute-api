@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +11,7 @@ from aeroroute_api.application.dto.optimization import (
     OptimizationResponse,
 )
 from aeroroute_api.application.services.optimization import optimize_still_air
-from aeroroute_api.infrastructure.db.models import Airport
+from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
 from aeroroute_api.infrastructure.db.optimization_runs import (
     persist_completed_run,
 )
@@ -41,6 +43,25 @@ async def list_optimizations(
         )
         for run in runs
     ]
+
+
+@router.get("/{run_id}", response_model=OptimizationResponse)
+async def get_optimization(
+    run_id: UUID,
+    session: AsyncSession = Depends(database_session),
+) -> OptimizationResponse:
+    run = await session.get(OptimizationRun, run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404, detail="optimization run not found"
+        )
+    if run.output_json is None:
+        raise HTTPException(
+            status_code=409,
+            detail="optimization run does not contain a response snapshot",
+        )
+    response = OptimizationResponse.model_validate(run.output_json)
+    return response.model_copy(update={"run_id": str(run.id)})
 
 
 @router.post(
@@ -79,5 +100,6 @@ async def create_optimization(
         request.aircraft_type,
         request.profile,
     )
+    response = response.model_copy(update={"request": request})
     run = await persist_completed_run(session, request, response)
     return response.model_copy(update={"run_id": str(run.id)})

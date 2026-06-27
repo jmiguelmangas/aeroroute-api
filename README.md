@@ -13,3 +13,15 @@ uv run aeroroute import-airports --bundle ../airport-bundle
 ```
 
 The legacy `--file airports.csv` command remains available for local migration.
+
+## Database migrations
+
+Apply migrations before starting the API:
+
+```bash
+uv run alembic upgrade head
+```
+
+Revision `0003_run_output_snapshot` adds the complete response snapshot used by
+`GET /api/v1/optimizations/{run_id}`. Runs created before this revision remain
+listed, but do not expose a reconstructable detail until they are recalculated.
