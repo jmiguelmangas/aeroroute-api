@@ -19,6 +19,9 @@ dependencies = [
   "uvicorn>=0.30"
 ]
 
+[project.optional-dependencies]
+performance-openap = ["aeroroute-optimizer[openap]>=0.1.0"]
+
 [tool.uv.sources]
 aeroroute-optimizer = { path = "../aeroroute-optimizer", editable = true }
 

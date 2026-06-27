@@ -11,6 +11,7 @@ from aeroroute_api.application.dto.optimization import (
     OptimizationResponse,
 )
 from aeroroute_api.application.services.optimization import optimize_still_air
+from aeroroute_api.config import settings
 from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
 from aeroroute_api.infrastructure.db.optimization_runs import (
     persist_completed_run,
@@ -99,6 +100,7 @@ async def create_optimization(
         destination.longitude_deg,
         request.aircraft_type,
         request.profile,
+        settings().aircraft_performance_provider,
     )
     response = response.model_copy(update={"request": request})
     run = await persist_completed_run(session, request, response)

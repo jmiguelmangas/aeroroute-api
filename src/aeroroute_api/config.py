@@ -10,6 +10,7 @@ class Settings:
         "postgresql+asyncpg://aeroroute:aeroroute@localhost:55432/aeroroute"
     )
     mlx_service_url: str | None = None
+    aircraft_performance_provider: str = "curated"
 
 
 def settings() -> Settings:
@@ -17,4 +18,8 @@ def settings() -> Settings:
     return Settings(
         database_url=os.getenv("DATABASE_URL", defaults.database_url),
         mlx_service_url=os.getenv("MLX_SERVICE_URL", defaults.mlx_service_url),
+        aircraft_performance_provider=os.getenv(
+            "AIRCRAFT_PERFORMANCE_PROVIDER",
+            defaults.aircraft_performance_provider,
+        ).lower(),
     )

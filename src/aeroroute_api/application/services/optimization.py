@@ -19,11 +19,13 @@ def optimize_still_air(
     destination_longitude_deg: float,
     aircraft_type: str,
     profile: str,
+    performance_provider: str = "curated",
 ) -> OptimizationResponse:
+    performance = aircraft_performance(performance_provider)
     problem = optimizer.build_still_air_lattice(
         optimizer.GeoPoint(origin_latitude_deg, origin_longitude_deg),
         optimizer.GeoPoint(destination_latitude_deg, destination_longitude_deg),
-        optimizer.CuratedPerformance(),
+        performance,
         aircraft_type,
         65_000.0,
         (10_000.0, 11_000.0),
@@ -56,7 +58,10 @@ def optimize_still_air(
         solver_termination_reason=result.diagnostics.termination_reason,
         baseline=_candidate_response(problem, baseline),
         assumptions=[
-            "Still-air deterministic performance model",
+            "Still-air deterministic route model",
+            f"Aircraft performance provider: "
+            f"{performance.provenance.provider} "
+            f"{performance.provenance.version}",
             "Representative initial mass of 65,000 kg",
             "Cruise levels restricted to FL328 and FL361",
             "Synthetic corridor with 100 km lateral offsets",
@@ -68,12 +73,27 @@ def optimize_still_air(
                 message="Live weather is not included in this result.",
             ),
             DataQualityFlag(
-                code="PERFORMANCE_CURATED",
+                code=f"PERFORMANCE_{performance.provenance.provider.upper()}",
                 severity="info",
-                message="Aircraft performance uses a curated reference model.",
+                message=(
+                    "Aircraft performance uses "
+                    f"{performance.provenance.provider} "
+                    f"{performance.provenance.version}."
+                ),
             ),
         ],
     )
+
+
+def aircraft_performance(
+    provider: str,
+) -> optimizer.AircraftPerformancePort:
+    normalized = provider.lower()
+    if normalized == "curated":
+        return optimizer.CuratedPerformance()
+    if normalized == "openap":
+        return optimizer.OpenAPPerformance()
+    raise ValueError(f"unsupported aircraft performance provider: {provider}")
 
 
 def _candidate_response(

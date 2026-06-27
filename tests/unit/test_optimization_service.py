@@ -3,6 +3,7 @@ import pytest
 from aeroroute_api.application.dto.optimization import RoutePoint
 from aeroroute_api.application.services.optimization import (
     _display_geojson,
+    aircraft_performance,
     optimize_still_air,
 )
 
@@ -45,3 +46,10 @@ def test_display_geojson_splits_at_antimeridian() -> None:
 
     assert geometry.type == "MultiLineString"
     assert len(geometry.coordinates) == 2
+
+
+def test_performance_provider_selection_is_explicit() -> None:
+    assert aircraft_performance("CURATED").provenance.provider == "curated"
+
+    with pytest.raises(ValueError, match="unsupported aircraft performance"):
+        aircraft_performance("automatic")
