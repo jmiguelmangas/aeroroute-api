@@ -27,6 +27,8 @@ Revision `0003_run_output_snapshot` adds the complete response snapshot used by
 listed, but do not expose a reconstructable detail until they are recalculated.
 Revision `0004_run_lifecycle` adds explicit `running`, `completed`, and `failed`
 state metadata; existing runs with response snapshots migrate to `completed`.
+Revision `0005_explanations` persists one fact-backed explanation per completed
+run so repeated reads remain stable and auditable.
 
 ## Cruise weather
 

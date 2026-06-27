@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgresUUID
@@ -119,3 +120,22 @@ class TrajectoryCandidate(Base):
     time_s: Mapped[float] = mapped_column(nullable=False)
     fuel_kg: Mapped[float] = mapped_column(nullable=False)
     score: Mapped[float] = mapped_column(nullable=False)
+
+
+class OptimizationExplanation(Base):
+    __tablename__ = "optimization_explanations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("optimization_runs.id"),
+        nullable=False,
+        unique=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    warnings_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    facts_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

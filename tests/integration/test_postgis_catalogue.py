@@ -13,8 +13,13 @@ from aeroroute_api.infrastructure.datasets.airport_importer import (
     import_airports_csv,
 )
 from aeroroute_api.application.dto.optimization import OptimizationRequest
+from aeroroute_api.application.services.explanation import (
+    explanation_facts_from_result,
+    render_deterministic_explanation,
+)
 from aeroroute_api.application.services.optimization import optimize_still_air
 from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
+from aeroroute_api.infrastructure.db.explanations import persist_explanation
 from aeroroute_api.infrastructure.db.optimization_runs import (
     complete_optimization_run,
     reserve_optimization_run,
@@ -90,6 +95,14 @@ async def test_migrations_import_and_spatial_coordinate_order(
                 session, reservation.run.id, response
             )
             duplicate = await reserve_optimization_run(session, request)
+            facts = explanation_facts_from_result(response)
+            explanation = render_deterministic_explanation(facts)
+            first_explanation = await persist_explanation(
+                session, reservation.run.id, explanation, facts
+            )
+            second_explanation = await persist_explanation(
+                session, reservation.run.id, explanation, facts
+            )
 
         assert first.accepted_rows == 1
         assert first.rejected_rows == 0
@@ -102,6 +115,7 @@ async def test_migrations_import_and_spatial_coordinate_order(
         assert duplicate.run.status == "completed"
         assert not duplicate.should_execute
         assert duplicate.run.input_json == request.model_dump(mode="json")
+        assert second_explanation.id == first_explanation.id
     finally:
         await engine.dispose()
         migrate("base")

@@ -66,6 +66,8 @@ class GeoJsonGeometry(BaseModel):
 
 class WaypointDetail(BaseModel):
     node_id: str
+    display_name: str = "Synthetic node"
+    kind: Literal["synthetic"] = "synthetic"
     latitude_deg: float
     longitude_deg: float
     flight_level: int

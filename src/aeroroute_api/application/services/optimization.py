@@ -238,6 +238,7 @@ def _candidate_response(
         waypoints.append(
             WaypointDetail(
                 node_id=node_id,
+                display_name=f"SYN-{index + 1:02d}",
                 latitude_deg=node.point.latitude_deg,
                 longitude_deg=node.point.longitude_deg,
                 flight_level=round(node.altitude_m / 30.48),
