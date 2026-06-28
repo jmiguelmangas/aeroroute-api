@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
@@ -13,6 +14,14 @@ from aeroroute_api.domain.ports import WindSample, WindSampleRequest
 
 class WeatherProviderError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceWind:
+    speed_kt: float
+    direction_from_deg: float
+    valid_at_utc: datetime
+    source: str = "open-meteo"
 
 
 class OpenMeteoWeatherClient:
@@ -39,6 +48,49 @@ class OpenMeteoWeatherClient:
         for date, date_requests in by_date.items():
             samples.update(await self._winds_for_date(date, date_requests))
         return tuple(samples[request] for request in requests)
+
+    async def surface_wind(
+        self, latitude_deg: float, longitude_deg: float, at_utc: datetime
+    ) -> SurfaceWind:
+        valid_at = at_utc.astimezone(UTC).replace(
+            minute=0, second=0, microsecond=0
+        )
+        date = valid_at.date().isoformat()
+        response = await self._get_with_retries(
+            {
+                "latitude": str(latitude_deg),
+                "longitude": str(longitude_deg),
+                "hourly": "wind_speed_10m,wind_direction_10m",
+                "wind_speed_unit": "kn",
+                "timezone": "GMT",
+                "start_date": date,
+                "end_date": date,
+            }
+        )
+        try:
+            response.raise_for_status()
+            hourly = response.json()["hourly"]
+            requested_time = valid_at.strftime("%Y-%m-%dT%H:00")
+            index = hourly["time"].index(requested_time)
+            speed = float(_series_value(hourly, "wind_speed_10m", index))
+            direction = float(
+                _series_value(hourly, "wind_direction_10m", index)
+            )
+        except (
+            KeyError,
+            ValueError,
+            IndexError,
+            TypeError,
+            httpx.HTTPStatusError,
+        ) as error:
+            raise WeatherProviderError(
+                "Open-Meteo surface wind response was invalid"
+            ) from error
+        if not all(math.isfinite(value) for value in (speed, direction)):
+            raise WeatherProviderError(
+                "Open-Meteo returned non-finite surface wind"
+            )
+        return SurfaceWind(speed, direction % 360, valid_at)
 
     async def _winds_for_date(
         self, date: str, requests: Sequence[WindSampleRequest]
@@ -99,14 +151,10 @@ class OpenMeteoWeatherClient:
                 "Open-Meteo response did not satisfy wind contract"
             ) from error
 
-    async def _get_with_retries(
-        self, params: dict[str, str]
-    ) -> httpx.Response:
+    async def _get_with_retries(self, params: dict[str, str]) -> httpx.Response:
         for attempt in range(1, self._max_attempts + 1):
             try:
-                response = await self._client.get(
-                    self.base_url, params=params
-                )
+                response = await self._client.get(self.base_url, params=params)
                 if response.status_code < 500:
                     return response
             except (httpx.TimeoutException, httpx.TransportError) as error:
@@ -135,14 +183,14 @@ class OpenMeteoWeatherClient:
             if not isinstance(times, list):
                 raise TypeError("time is not a list")
             index = times.index(requested_time)
-            speed = float(_series_value(payload, f"wind_speed_{pressure}", index))
+            speed = float(
+                _series_value(payload, f"wind_speed_{pressure}", index)
+            )
             direction = float(
                 _series_value(payload, f"wind_direction_{pressure}", index)
             )
             height = float(
-                _series_value(
-                    payload, f"geopotential_height_{pressure}", index
-                )
+                _series_value(payload, f"geopotential_height_{pressure}", index)
             )
         except (KeyError, ValueError, IndexError, TypeError) as error:
             raise WeatherProviderError(
@@ -168,9 +216,7 @@ class OpenMeteoWeatherClient:
         )
 
 
-def _series_value(
-    payload: dict[str, object], key: str, index: int
-) -> object:
+def _series_value(payload: dict[str, object], key: str, index: int) -> object:
     values = payload[key]
     if not isinstance(values, list):
         raise TypeError(f"{key} is not a list")

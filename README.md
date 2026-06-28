@@ -29,6 +29,20 @@ Revision `0004_run_lifecycle` adds explicit `running`, `completed`, and `failed`
 state metadata; existing runs with response snapshots migrate to `completed`.
 Revision `0005_explanations` persists one fact-backed explanation per completed
 run so repeated reads remain stable and auditable.
+Revision `0006_navigation_snapshots` persists one immutable AIRAC terminal and
+en-route provenance snapshot per completed run.
+
+## Terminal navigation
+
+`GET /api/v1/airports/{icao}/runways` returns published runway ends, compatible
+SID/STAR counts and an advisory recommendation. When `at_utc` is supplied,
+Open-Meteo 10 m wind contributes headwind and crosswind components; NOTAM,
+runway condition and ATC assignment remain explicitly unverified.
+
+`POST /api/v1/optimizations` accepts optional departure and arrival runways.
+Connected AIRAC graphs preserve SID, airway and STAR legs. Oceanic or otherwise
+disconnected joins retain real runway-compatible procedures around explicit
+`DCT` legs and emit `TERMINAL_ROUTE_DISCONNECTED`.
 
 ## Cruise weather
 

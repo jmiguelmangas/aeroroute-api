@@ -8,7 +8,12 @@ from aeroroute_api.application.dto.optimization import (
     CandidateResponse,
     DataQualityFlag,
     OptimizationResponse,
+    TerminalSelection,
     WaypointDetail,
+)
+from aeroroute_api.application.services.terminal_options import (
+    procedures_for_runway,
+    runway_options,
 )
 from aeroroute_api.application.services.airway_graph import (
     AirwayPathPoint,
@@ -42,22 +47,84 @@ async def enrich_winner_with_airac(
         return response
     internal = winner.waypoints[1:-1]
     sid_procedures: tuple[AiracProcedure, ...] = ()
+    star_procedures: tuple[AiracProcedure, ...] = ()
+    departure_runway: str | None = None
+    arrival_runway: str | None = None
+    rationale: list[str] = []
+    option_cycles: set[str] = set()
     if response.request is not None:
+        departure_runway = response.request.departure_runway
+        arrival_runway = response.request.arrival_runway
+        if departure_runway is None:
+            try:
+                options = await runway_options(
+                    client, response.request.origin_icao, "SID"
+                )
+                departure_runway = options.suggested_runway
+                rationale.extend(options.recommendation_basis)
+                if options.airac_cycle:
+                    option_cycles.add(options.airac_cycle)
+            except AiracProviderError:
+                pass
+        if arrival_runway is None:
+            try:
+                options = await runway_options(
+                    client, response.request.destination_icao, "STAR"
+                )
+                arrival_runway = options.suggested_runway
+                rationale.extend(options.recommendation_basis)
+                if options.airac_cycle:
+                    option_cycles.add(options.airac_cycle)
+            except AiracProviderError:
+                pass
         try:
-            sid_procedures = await client.procedures(
-                response.request.origin_icao, "SID"
+            sid_procedures = procedures_for_runway(
+                await client.procedures(response.request.origin_icao, "SID"),
+                departure_runway,
             )
         except AiracProviderError:
             pass
+        try:
+            star_procedures = procedures_for_runway(
+                await client.procedures(
+                    response.request.destination_icao, "STAR"
+                ),
+                arrival_runway,
+            )
+        except AiracProviderError:
+            pass
+    terminal_selection = TerminalSelection(
+        departure_runway=departure_runway,
+        departure_runway_suggested=bool(
+            response.request and response.request.departure_runway is None
+        ),
+        arrival_runway=arrival_runway,
+        arrival_runway_suggested=bool(
+            response.request and response.request.arrival_runway is None
+        ),
+        airac_cycle=(
+            ", ".join(sorted(option_cycles)) if option_cycles else None
+        ),
+        rationale=list(dict.fromkeys(rationale)),
+    )
     try:
         airway_path = await _discover_corridor_path(
-            winner, client, sid_procedures
+            winner, client, sid_procedures, star_procedures
         )
     except AiracProviderError:
         airway_path = ()
     if airway_path:
         sid = _matching_sid(sid_procedures, airway_path)
-        return _response_with_connected_path(response, airway_path, sid)
+        star = _matching_star(star_procedures, airway_path)
+        return _response_with_connected_path(
+            response,
+            airway_path,
+            sid,
+            star,
+            departure_runway,
+            arrival_runway,
+            rationale,
+        )
     try:
         candidate_layers = await asyncio.gather(
             *(
@@ -86,6 +153,7 @@ async def enrich_winner_with_airac(
     except AiracProviderError:
         return response.model_copy(
             update={
+                "terminal_selection": terminal_selection,
                 "data_quality": [
                     *response.data_quality,
                     DataQualityFlag(
@@ -96,7 +164,7 @@ async def enrich_winner_with_airac(
                             "nodes are shown instead."
                         ),
                     ),
-                ]
+                ],
             }
         )
 
@@ -149,6 +217,22 @@ async def enrich_winner_with_airac(
             update={"kind": "airport", "display_name": destination_name}
         )
     )
+    sid = _nearest_terminal_procedure(sid_procedures, points[1], use_exit=True)
+    star = _nearest_terminal_procedure(
+        star_procedures, points[-2], use_exit=False
+    )
+    if sid or star:
+        points = _attach_degraded_terminal_procedures(winner, points, sid, star)
+        terminal_selection = terminal_selection.model_copy(
+            update={
+                "sid_identifier": sid.identifier if sid else None,
+                "star_identifier": star.identifier if star else None,
+                "rationale": [
+                    *terminal_selection.rationale,
+                    "Runway-compatible terminal procedures are retained; unconnected terminal-to-enroute joins are explicit DCT legs.",
+                ],
+            }
+        )
     validated_segments = 0
     navigation_indexes = [
         index
@@ -160,6 +244,8 @@ async def enrich_winner_with_airac(
     ):
         previous = points[previous_index]
         current = points[current_index]
+        if previous.procedure_type or current.procedure_type:
+            continue
         try:
             airways = await client.airway_route(
                 previous.display_name, current.display_name
@@ -183,6 +269,7 @@ async def enrich_winner_with_airac(
     return response.model_copy(
         update={
             "winner": CandidateResponse.model_validate(enriched),
+            "terminal_selection": terminal_selection,
             "data_quality": [
                 *response.data_quality,
                 DataQualityFlag(
@@ -192,6 +279,15 @@ async def enrich_winner_with_airac(
                         f"Navigation references use AIRAC.net cycle {cycle_text}; "
                         f"{validated_segments} internal segments have confirmed "
                         "airway connectivity and remaining segments are DCT."
+                    ),
+                ),
+                DataQualityFlag(
+                    code="TERMINAL_ROUTE_DISCONNECTED",
+                    severity="warning",
+                    message=(
+                        "Runway-compatible SID/STAR are retained where available, "
+                        "but could not both be connected through one bounded AIRAC "
+                        "graph; terminal-to-enroute joins remain explicit DCT legs."
                     ),
                 ),
             ],
@@ -213,6 +309,7 @@ async def _discover_corridor_path(
     winner: CandidateResponse,
     client: AiracNavigationClient,
     sid_procedures: tuple[AiracProcedure, ...] = (),
+    star_procedures: tuple[AiracProcedure, ...] = (),
 ) -> tuple[AirwayPathPoint, ...]:
     origin = winner.geometry[0]
     destination = winner.geometry[-1]
@@ -240,7 +337,11 @@ async def _discover_corridor_path(
     sid_exits = {
         procedure.points[-1].identifier for procedure in sid_procedures
     }
+    star_entries = {
+        procedure.points[0].identifier for procedure in star_procedures
+    }
     identifiers.update(sid_exits)
+    identifiers.update(star_entries)
     memberships = dict(
         zip(
             identifiers,
@@ -271,16 +372,25 @@ async def _discover_corridor_path(
         for identifier in sid_exits
         for airway in memberships.get(identifier, ())
     )
+    airway_identifiers.update(
+        airway
+        for identifier in star_entries
+        for airway in memberships.get(identifier, ())
+    )
     routes = await asyncio.gather(
         *(client.airway_points(identifier) for identifier in airway_identifiers)
     )
     connected_sid_exits = {
         identifier for identifier in sid_exits if memberships.get(identifier)
     }
+    connected_star_entries = {
+        identifier for identifier in star_entries if memberships.get(identifier)
+    }
     return find_airway_path(
         tuple(routes),
         connected_sid_exits or {fix.identifier for fix in nonempty_layers[0]},
-        {fix.identifier for fix in nonempty_layers[-1]},
+        connected_star_entries
+        or {fix.identifier for fix in nonempty_layers[-1]},
     )
 
 
@@ -288,6 +398,10 @@ def _response_with_connected_path(
     response: OptimizationResponse,
     airway_path: tuple[AirwayPathPoint, ...],
     sid: AiracProcedure | None,
+    star: AiracProcedure | None,
+    departure_runway: str | None,
+    arrival_runway: str | None,
+    rationale: list[str],
 ) -> OptimizationResponse:
     winner = response.winner
     assert winner is not None
@@ -299,7 +413,7 @@ def _response_with_connected_path(
         if response.request
         else winner.path[-1]
     )
-    navigation_path = _compose_navigation_path(airway_path, sid)
+    navigation_path = _compose_navigation_path(airway_path, sid, star)
     coordinates = [
         (winner.waypoints[0].latitude_deg, winner.waypoints[0].longitude_deg),
         *((item.latitude_deg, item.longitude_deg) for item in navigation_path),
@@ -370,8 +484,8 @@ def _response_with_connected_path(
             update={
                 "kind": "airport",
                 "display_name": destination_name,
-                "inbound_via": "DCT",
-                "airway_validated": False,
+                "inbound_via": star.identifier if star else "DCT",
+                "airway_validated": bool(star),
             }
         )
     )
@@ -380,6 +494,21 @@ def _response_with_connected_path(
     return response.model_copy(
         update={
             "winner": CandidateResponse.model_validate(enriched),
+            "terminal_selection": TerminalSelection(
+                departure_runway=departure_runway,
+                departure_runway_suggested=bool(
+                    response.request
+                    and response.request.departure_runway is None
+                ),
+                sid_identifier=sid.identifier if sid else None,
+                arrival_runway=arrival_runway,
+                arrival_runway_suggested=bool(
+                    response.request and response.request.arrival_runway is None
+                ),
+                star_identifier=star.identifier if star else None,
+                airac_cycle=cycle_text,
+                rationale=list(dict.fromkeys(rationale)),
+            ),
             "data_quality": [
                 *response.data_quality,
                 DataQualityFlag(
@@ -389,10 +518,10 @@ def _response_with_connected_path(
                         f"AIRAC.net cycle {cycle_text} produced a connected "
                         f"{len(navigation_path)}-fix path; "
                         + (
-                            f"SID {sid.identifier} runway family {sid.runway} is "
-                            "connected and the arrival join remains DCT."
-                            if sid
-                            else "airport joins remain DCT."
+                            f"SID {sid.identifier} and STAR {star.identifier} "
+                            "are connected to the airway graph."
+                            if sid and star
+                            else "one or both airport joins remain DCT."
                         )
                     ),
                 ),
@@ -424,40 +553,212 @@ def _matching_sid(
     )
 
 
+def _matching_star(
+    procedures: tuple[AiracProcedure, ...],
+    airway_path: tuple[AirwayPathPoint, ...],
+) -> AiracProcedure | None:
+    positions = {
+        item.point.identifier: index for index, item in enumerate(airway_path)
+    }
+    matches = [
+        procedure
+        for procedure in procedures
+        if procedure.points[0].identifier in positions
+    ]
+    if not matches:
+        return None
+    return max(
+        matches,
+        key=lambda procedure: (
+            positions[procedure.points[0].identifier],
+            -len(procedure.points),
+        ),
+    )
+
+
+def _nearest_terminal_procedure(
+    procedures: tuple[AiracProcedure, ...],
+    target: WaypointDetail,
+    *,
+    use_exit: bool,
+) -> AiracProcedure | None:
+    if not procedures:
+        return None
+    return min(
+        procedures,
+        key=lambda procedure: (
+            _distance_m(
+                (
+                    procedure.points[-1 if use_exit else 0].latitude_deg,
+                    procedure.points[-1 if use_exit else 0].longitude_deg,
+                ),
+                (target.latitude_deg, target.longitude_deg),
+            ),
+            procedure.identifier,
+        ),
+    )
+
+
+def _attach_degraded_terminal_procedures(
+    winner: CandidateResponse,
+    route_points: list[WaypointDetail],
+    sid: AiracProcedure | None,
+    star: AiracProcedure | None,
+) -> list[WaypointDetail]:
+    internal = list(route_points[1:-1])
+    if internal and sid:
+        internal[0] = internal[0].model_copy(
+            update={"inbound_via": "DCT", "airway_validated": False}
+        )
+    departure = _procedure_waypoints(sid, "SID") if sid else []
+    arrival = _procedure_waypoints(star, "STAR") if star else []
+    if arrival:
+        arrival[0] = arrival[0].model_copy(
+            update={"inbound_via": "DCT", "airway_validated": False}
+        )
+    combined = [
+        route_points[0],
+        *departure,
+        *internal,
+        *arrival,
+        route_points[-1],
+    ]
+    deduplicated = [combined[0]]
+    for point in combined[1:]:
+        previous = deduplicated[-1]
+        if (
+            point.display_name == previous.display_name
+            and point.latitude_deg == previous.latitude_deg
+            and point.longitude_deg == previous.longitude_deg
+        ):
+            continue
+        deduplicated.append(point)
+    coordinates = [
+        (point.latitude_deg, point.longitude_deg) for point in deduplicated
+    ]
+    distances = [
+        _distance_m(first, second)
+        for first, second in zip(coordinates, coordinates[1:])
+    ]
+    total = sum(distances)
+    cumulative = 0.0
+    output: list[WaypointDetail] = []
+    for index, point in enumerate(deduplicated):
+        if index:
+            cumulative += distances[index - 1]
+        fraction = cumulative / total if total else 0.0
+        nearest_solver = winner.waypoints[
+            min(
+                round(fraction * (len(winner.waypoints) - 1)),
+                len(winner.waypoints) - 1,
+            )
+        ]
+        output.append(
+            point.model_copy(
+                update={
+                    "elapsed_time_s": winner.time_s * fraction,
+                    "cumulative_distance_m": winner.distance_m * fraction,
+                    "cumulative_fuel_kg": winner.fuel_kg * fraction,
+                    "estimated_mass_kg": (
+                        winner.waypoints[0].estimated_mass_kg
+                        + (
+                            winner.waypoints[-1].estimated_mass_kg
+                            - winner.waypoints[0].estimated_mass_kg
+                        )
+                        * fraction
+                    ),
+                    "wind_component_kt": nearest_solver.wind_component_kt,
+                }
+            )
+        )
+    if star:
+        output[-1] = output[-1].model_copy(
+            update={
+                "inbound_via": star.identifier,
+                "airway_validated": True,
+            }
+        )
+    return output
+
+
+def _procedure_waypoints(
+    procedure: AiracProcedure, procedure_type: str
+) -> list[WaypointDetail]:
+    return [
+        WaypointDetail(
+            node_id=f"AIRAC:{procedure_type}:{procedure.identifier}:{index}",
+            display_name=point.identifier,
+            kind="navigation_fix",
+            latitude_deg=point.latitude_deg,
+            longitude_deg=point.longitude_deg,
+            flight_level=0,
+            elapsed_time_s=0,
+            cumulative_distance_m=0,
+            cumulative_fuel_kg=0,
+            estimated_mass_kg=0,
+            navigation_source="airac.net",
+            airac_cycle=procedure.cycle,
+            inbound_via=procedure.identifier,
+            airway_validated=True,
+            procedure_type=procedure_type,
+            procedure_identifier=procedure.identifier,
+            runway=procedure.runway,
+        )
+        for index, point in enumerate(procedure.points, start=1)
+    ]
+
+
 def _compose_navigation_path(
     airway_path: tuple[AirwayPathPoint, ...],
     sid: AiracProcedure | None,
+    star: AiracProcedure | None,
 ) -> tuple[_NavigationPathPoint, ...]:
-    if sid is None:
-        return tuple(
-            _NavigationPathPoint(
-                item.point.identifier,
-                item.point.latitude_deg,
-                item.point.longitude_deg,
-                item.inbound_airway or "DCT",
-                item.point.cycle,
+    airway_start = 0
+    departure_points: tuple[_NavigationPathPoint, ...] = ()
+    if sid is not None:
+        exit_identifier = sid.points[-1].identifier
+        airway_start = (
+            next(
+                index
+                for index, item in enumerate(airway_path)
+                if item.point.identifier == exit_identifier
             )
-            for item in airway_path
+            + 1
         )
-    exit_identifier = sid.points[-1].identifier
-    exit_index = next(
-        index
-        for index, item in enumerate(airway_path)
-        if item.point.identifier == exit_identifier
-    )
-    procedure_points = tuple(
-        _NavigationPathPoint(
-            point.identifier,
-            point.latitude_deg,
-            point.longitude_deg,
-            sid.identifier,
-            sid.cycle,
-            "SID",
-            sid.runway,
+        departure_points = tuple(
+            _NavigationPathPoint(
+                point.identifier,
+                point.latitude_deg,
+                point.longitude_deg,
+                sid.identifier,
+                sid.cycle,
+                "SID",
+                sid.runway,
+            )
+            for point in sid.points
         )
-        for point in sid.points
-    )
-    remaining_airway = tuple(
+    airway_end = len(airway_path)
+    arrival_points: tuple[_NavigationPathPoint, ...] = ()
+    if star is not None:
+        entry_identifier = star.points[0].identifier
+        airway_end = next(
+            index
+            for index, item in enumerate(airway_path)
+            if item.point.identifier == entry_identifier
+        )
+        arrival_points = tuple(
+            _NavigationPathPoint(
+                point.identifier,
+                point.latitude_deg,
+                point.longitude_deg,
+                star.identifier,
+                star.cycle,
+                "STAR",
+                star.runway,
+            )
+            for point in star.points
+        )
+    enroute_points = tuple(
         _NavigationPathPoint(
             item.point.identifier,
             item.point.latitude_deg,
@@ -465,9 +766,9 @@ def _compose_navigation_path(
             item.inbound_airway or "DCT",
             item.point.cycle,
         )
-        for item in airway_path[exit_index + 1 :]
+        for item in airway_path[airway_start:airway_end]
     )
-    return (*procedure_points, *remaining_airway)
+    return (*departure_points, *enroute_points, *arrival_points)
 
 
 def _distance_m(

@@ -45,6 +45,35 @@ async def test_normalizes_pressure_level_wind_without_network() -> None:
 
 
 @pytest.mark.anyio
+async def test_reads_hourly_surface_wind_in_knots() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["hourly"] == (
+            "wind_speed_10m,wind_direction_10m"
+        )
+        assert request.url.params["wind_speed_unit"] == "kn"
+        return httpx.Response(
+            200,
+            json={
+                "hourly": {
+                    "time": ["2026-06-23T12:00"],
+                    "wind_speed_10m": [18.0],
+                    "wind_direction_10m": [320.0],
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as client:
+        result = await OpenMeteoWeatherClient(client).surface_wind(
+            40.49, -3.57, datetime(2026, 6, 23, 12, tzinfo=UTC)
+        )
+
+    assert result.speed_kt == 18
+    assert result.direction_from_deg == 320
+
+
+@pytest.mark.anyio
 async def test_rejects_provider_contract_change() -> None:
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(

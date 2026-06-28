@@ -46,6 +46,16 @@ class AiracProcedure:
     cycle: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class AiracRunway:
+    identifier: str
+    bearing_deg: float
+    length_ft: float
+    width_ft: float | None
+    surface: str | None
+    cycle: str | None
+
+
 class AiracNavigationClient:
     base_url = "https://airac.net/api/v1"
 
@@ -56,6 +66,88 @@ class AiracNavigationClient:
         self._procedure_cache: dict[
             tuple[str, str], tuple[AiracProcedure, ...]
         ] = {}
+        self._runway_cache: dict[str, tuple[AiracRunway, ...]] = {}
+        self._airport_cache: dict[str, dict[str, object]] = {}
+
+    async def airport_position(self, airport: str) -> tuple[float, float]:
+        data = await self._airport_data(airport)
+        coordinates = data["coordinates"]
+        if not isinstance(coordinates, dict):
+            raise AiracProviderError("AIRAC airport coordinates are invalid")
+        try:
+            return float(coordinates["lat"]), float(coordinates["lon"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise AiracProviderError(
+                "AIRAC airport coordinates are invalid"
+            ) from error
+
+    async def _airport_data(self, airport: str) -> dict[str, object]:
+        airport = airport.upper()
+        if airport in self._airport_cache:
+            return self._airport_cache[airport]
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/airports/{airport}",
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "AeroRoute-MLX/0.1 (development)",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()["data"]
+            if not isinstance(data, dict):
+                raise TypeError("AIRAC airport data is not an object")
+            data["_airac_cycle"] = response.headers.get("X-AIRAC-Cycle")
+            self._airport_cache[airport] = data
+            return data
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            raise AiracProviderError("AIRAC airport lookup failed") from error
+
+    async def runways(self, airport: str) -> tuple[AiracRunway, ...]:
+        airport = airport.upper()
+        if airport in self._runway_cache:
+            return self._runway_cache[airport]
+        try:
+            data = await self._airport_data(airport)
+            raw_runways = data.get("runways", [])
+            runways: list[AiracRunway] = []
+            for runway in raw_runways:
+                for prefix in ("base", "reciprocal"):
+                    identifier = runway.get(f"{prefix}_identifier")
+                    bearing = runway.get(f"{prefix}_bearing")
+                    if not identifier:
+                        continue
+                    if bearing is None:
+                        bearing = _bearing_from_runway_identifier(
+                            str(identifier)
+                        )
+                    runways.append(
+                        AiracRunway(
+                            identifier=str(identifier),
+                            bearing_deg=float(bearing),
+                            length_ft=float(runway["length_ft"]),
+                            width_ft=(
+                                float(runway["width_ft"])
+                                if runway.get("width_ft") is not None
+                                else None
+                            ),
+                            surface=(
+                                str(runway["surface"])
+                                if runway.get("surface")
+                                else None
+                            ),
+                            cycle=(
+                                str(data["_airac_cycle"])
+                                if data.get("_airac_cycle")
+                                else None
+                            ),
+                        )
+                    )
+            output = tuple(sorted(runways, key=lambda item: item.identifier))
+            self._runway_cache[airport] = output
+            return output
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            raise AiracProviderError("AIRAC runway lookup failed") from error
 
     async def nearest_fix(
         self, latitude_deg: float, longitude_deg: float, radius_nm: float = 120
@@ -244,9 +336,20 @@ class AiracNavigationClient:
             for detail in details:
                 detail.raise_for_status()
                 data = detail.json()["data"]
-                for runway, segments in data.get(
-                    "runway_transitions", {}
-                ).items():
+                runway_transitions = data.get("runway_transitions", {})
+                transition_groups = (
+                    list(runway_transitions.items())
+                    if isinstance(runway_transitions, dict)
+                    else []
+                )
+                if not transition_groups:
+                    generic_transitions = data.get("transitions", {})
+                    if isinstance(generic_transitions, dict):
+                        transition_groups = [
+                            ("ALL", segments)
+                            for segments in generic_transitions.values()
+                        ]
+                for runway, segments in transition_groups:
                     points = tuple(
                         AiracProcedurePoint(
                             identifier=str(segment["fix_identifier"]),
@@ -276,3 +379,13 @@ class AiracNavigationClient:
             return output
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC procedure lookup failed") from error
+
+
+def _bearing_from_runway_identifier(identifier: str) -> float:
+    digits = "".join(
+        character for character in identifier if character.isdigit()
+    )
+    if not digits:
+        raise ValueError("runway identifier has no magnetic bearing")
+    bearing = int(digits[:2]) * 10
+    return float(360 if bearing == 0 else bearing)

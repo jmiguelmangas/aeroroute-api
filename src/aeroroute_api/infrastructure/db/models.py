@@ -139,3 +139,23 @@ class OptimizationExplanation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class NavigationSnapshot(Base):
+    __tablename__ = "navigation_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("optimization_runs.id"),
+        nullable=False,
+        unique=True,
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    airac_cycle: Mapped[str | None] = mapped_column(String(64))
+    payload_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

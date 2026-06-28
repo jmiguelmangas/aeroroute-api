@@ -10,6 +10,21 @@ class OptimizationRequest(BaseModel):
     departure_time_utc: datetime | None = None
     aircraft_type: Literal["A320", "B738", "B77W", "B788", "A359", "A388"]
     profile: Literal["minimum_fuel", "minimum_time", "balanced"] = "balanced"
+    departure_runway: str | None = Field(
+        default=None, min_length=2, max_length=8
+    )
+    arrival_runway: str | None = Field(default=None, min_length=2, max_length=8)
+
+
+class TerminalSelection(BaseModel):
+    departure_runway: str | None = None
+    departure_runway_suggested: bool = False
+    sid_identifier: str | None = None
+    arrival_runway: str | None = None
+    arrival_runway_suggested: bool = False
+    star_identifier: str | None = None
+    airac_cycle: str | None = None
+    rationale: list[str] = Field(default_factory=list)
 
 
 class CandidateResponse(BaseModel):
@@ -107,6 +122,7 @@ class OptimizationResponse(BaseModel):
     data_quality: list[DataQualityFlag] = Field(default_factory=list)
     request: OptimizationRequest | None = None
     fuel_iteration: FuelIterationSummary | None = None
+    terminal_selection: TerminalSelection | None = None
 
 
 class OptimizationHistoryItem(BaseModel):

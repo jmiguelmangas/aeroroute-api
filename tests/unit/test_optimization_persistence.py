@@ -3,13 +3,20 @@ from uuid import uuid4
 
 import pytest
 
-from aeroroute_api.application.dto.optimization import OptimizationRequest
+from aeroroute_api.application.dto.optimization import (
+    OptimizationRequest,
+    TerminalSelection,
+)
 from aeroroute_api.application.services.optimization import optimize_still_air
-from aeroroute_api.infrastructure.db.models import OptimizationRun
+from aeroroute_api.infrastructure.db.models import (
+    NavigationSnapshot,
+    OptimizationRun,
+)
 from aeroroute_api.infrastructure.db.optimization_runs import (
     complete_optimization_run,
     fail_optimization_run,
     reserve_optimization_run,
+    optimization_request_hash,
 )
 
 
@@ -58,6 +65,63 @@ def _request_and_response():
         "minimum_fuel",
     ).model_copy(update={"request": request})
     return request, response
+
+
+def test_request_hash_changes_with_terminal_selection() -> None:
+    base, _ = _request_and_response()
+    selected = base.model_copy(
+        update={"departure_runway": "32L", "arrival_runway": "13R"}
+    )
+
+    assert optimization_request_hash(base) != optimization_request_hash(
+        selected
+    )
+
+
+@pytest.mark.anyio
+async def test_completed_run_persists_navigation_snapshot() -> None:
+    request, response = _request_and_response()
+    assert response.winner is not None
+    waypoints = list(response.winner.waypoints)
+    waypoints[1] = waypoints[1].model_copy(
+        update={
+            "display_name": "PRADO",
+            "kind": "navigation_fix",
+            "navigation_source": "airac.net",
+            "airac_cycle": "2606",
+            "inbound_via": "Z224",
+            "airway_validated": True,
+        }
+    )
+    response = response.model_copy(
+        update={
+            "winner": response.winner.model_copy(
+                update={"waypoints": waypoints}
+            ),
+            "terminal_selection": TerminalSelection(
+                departure_runway="32L",
+                sid_identifier="VAST2N",
+                arrival_runway="13R",
+                star_identifier="CAMRN5",
+                airac_cycle="2606",
+            ),
+        }
+    )
+    session = _Session()
+    reservation = await reserve_optimization_run(session, request)  # type: ignore[arg-type]
+
+    await complete_optimization_run(  # type: ignore[arg-type]
+        session, reservation.run.id, response
+    )
+
+    snapshots = [
+        item for item in session.added if isinstance(item, NavigationSnapshot)
+    ]
+    assert len(snapshots) == 1
+    assert snapshots[0].airac_cycle == "2606"
+    terminal = snapshots[0].payload_json["terminal_selection"]
+    assert isinstance(terminal, dict)
+    assert terminal["sid_identifier"] == "VAST2N"
 
 
 @pytest.mark.anyio

@@ -20,6 +20,10 @@ from aeroroute_api.application.services.optimization import (
 from aeroroute_api.application.services.navigation import (
     enrich_winner_with_airac,
 )
+from aeroroute_api.application.services.terminal_options import (
+    IncompatibleRunwayError,
+    validate_runway_selection,
+)
 from aeroroute_api.application.services.execution_guard import (
     OptimizationCapacityExceeded,
     OptimizationDeadlineExceeded,
@@ -36,7 +40,10 @@ from aeroroute_api.infrastructure.weather.cache import CachedWeatherPort
 from aeroroute_api.infrastructure.weather.open_meteo import (
     OpenMeteoWeatherClient,
 )
-from aeroroute_api.infrastructure.navigation.airac import AiracNavigationClient
+from aeroroute_api.infrastructure.navigation.airac import (
+    AiracNavigationClient,
+    AiracProviderError,
+)
 
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
 _weather_client = httpx.AsyncClient(timeout=5.0)
@@ -123,6 +130,33 @@ async def create_optimization(
         )
     origin = by_code[airport_codes[0]]
     destination = by_code[airport_codes[1]]
+    try:
+        if request.departure_runway:
+            await validate_runway_selection(
+                _navigation_client,
+                airport_codes[0],
+                "SID",
+                request.departure_runway,
+            )
+        if request.arrival_runway:
+            await validate_runway_selection(
+                _navigation_client,
+                airport_codes[1],
+                "STAR",
+                request.arrival_runway,
+            )
+    except IncompatibleRunwayError as error:
+        raise PublicAPIError(
+            422,
+            "runway_procedure_incompatible",
+            str(error),
+        ) from error
+    except AiracProviderError as error:
+        raise PublicAPIError(
+            503,
+            "navigation_provider_unavailable",
+            "AIRAC runway and procedure data are unavailable.",
+        ) from error
     configured = settings()
     reservation = await reserve_optimization_run(session, request)
     run = reservation.run
@@ -164,6 +198,8 @@ async def create_optimization(
 
     try:
         response = await _execution_guard.run(execute)
+        response = response.model_copy(update={"request": request})
+        response = await enrich_winner_with_airac(response, _navigation_client)
     except OptimizationCapacityExceeded as error:
         await fail_optimization_run(session, run.id, "capacity_exceeded")
         raise PublicAPIError(
@@ -188,7 +224,5 @@ async def create_optimization(
             "optimization_failed",
             "The optimization could not be completed.",
         ) from error
-    response = response.model_copy(update={"request": request})
-    response = await enrich_winner_with_airac(response, _navigation_client)
     completed = await complete_optimization_run(session, run.id, response)
     return response.model_copy(update={"run_id": str(completed.id)})

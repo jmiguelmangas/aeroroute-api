@@ -1,10 +1,15 @@
 from alembic import context
+from pathlib import Path
 from sqlalchemy import engine_from_config, pool
 
 from aeroroute_api.infrastructure.db.models import Base
 
 config = context.config
 target_metadata = Base.metadata
+
+# FAT/exFAT volumes may expose macOS AppleDouble sidecars as Python files.
+for sidecar in (Path(__file__).parent / "versions").glob("._*.py"):
+    sidecar.unlink(missing_ok=True)
 
 
 def run_migrations_offline() -> None:

@@ -1,18 +1,36 @@
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 
 from aeroroute_api.application.services.navigation import (
+    _attach_degraded_terminal_procedures,
+    _compose_navigation_path,
+    _matching_star,
     _select_connected_fixes,
     enrich_winner_with_airac,
 )
-from aeroroute_api.application.services.airway_graph import find_airway_path
+from aeroroute_api.application.services.airway_graph import (
+    AirwayPathPoint,
+    find_airway_path,
+)
 from aeroroute_api.application.services.optimization import optimize_still_air
+from aeroroute_api.application.services.terminal_options import (
+    IncompatibleRunwayError,
+    procedure_options,
+    runway_options,
+    validate_runway_selection,
+)
 from aeroroute_api.infrastructure.navigation.airac import (
     AiracAirwayPoint,
     AiracFix,
     AiracNavigationClient,
+    AiracProcedure,
+    AiracProcedurePoint,
     AiracProviderError,
+    AiracRunway,
 )
+from aeroroute_api.infrastructure.weather.open_meteo import SurfaceWind
 
 
 @pytest.mark.anyio
@@ -231,3 +249,296 @@ async def test_airac_client_parses_runway_procedure_points() -> None:
         "DB570",
         "SENPA",
     ]
+
+
+@pytest.mark.anyio
+async def test_airac_client_expands_both_runway_ends() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"X-AIRAC-Cycle": "2607"},
+            json={
+                "data": {
+                    "runways": [
+                        {
+                            "base_identifier": "14R",
+                            "base_bearing": 142,
+                            "reciprocal_identifier": "32L",
+                            "reciprocal_bearing": 322,
+                            "length_ft": 13084,
+                            "width_ft": 197,
+                            "surface": "asphalt",
+                        }
+                    ]
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        runways = await AiracNavigationClient(http).runways("LEMD")
+
+    assert [runway.identifier for runway in runways] == ["14R", "32L"]
+    assert runways[1].bearing_deg == 322
+    assert runways[1].cycle == "2607"
+
+
+@pytest.mark.anyio
+async def test_airac_client_derives_missing_runway_bearing() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "runways": [
+                        {
+                            "base_identifier": "16R",
+                            "reciprocal_identifier": "34L",
+                            "length_ft": 13123,
+                        }
+                    ]
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        runways = await AiracNavigationClient(http).runways("RJAA")
+
+    assert [(runway.identifier, runway.bearing_deg) for runway in runways] == [
+        ("16R", 160),
+        ("34L", 340),
+    ]
+
+
+@pytest.mark.anyio
+async def test_airac_client_parses_runway_independent_star() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/procedures"):
+            return httpx.Response(
+                200, json={"data": [{"identifier": "CAMRN5"}]}
+            )
+        return httpx.Response(
+            200,
+            headers={"X-AIRAC-Cycle": "2607"},
+            json={
+                "data": {
+                    "identifier": "CAMRN5",
+                    "runway_transitions": [],
+                    "transitions": {
+                        "ALL": [
+                            {
+                                "fix_identifier": "SIE",
+                                "fix_coordinates": {"lat": 39.1, "lon": -74.8},
+                            },
+                            {
+                                "fix_identifier": "CAMRN",
+                                "fix_coordinates": {
+                                    "lat": 40.02,
+                                    "lon": -73.86,
+                                },
+                            },
+                        ]
+                    },
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        procedures = await AiracNavigationClient(http).procedures(
+            "KJFK", "STAR"
+        )
+
+    assert procedures[0].runway == "ALL"
+    assert [point.identifier for point in procedures[0].points] == [
+        "SIE",
+        "CAMRN",
+    ]
+
+
+class _TerminalClient:
+    def __init__(self) -> None:
+        self._runways = (
+            AiracRunway("30L", 300, 12000, 200, "asphalt", "2607"),
+            AiracRunway("12R", 120, 13000, 200, "asphalt", "2607"),
+        )
+        self._procedures = (
+            AiracProcedure(
+                "SENP2F",
+                "SID",
+                "30B",
+                (
+                    AiracProcedurePoint("DB570", 25.29, 55.29),
+                    AiracProcedurePoint("SENPA", 25.33, 54.53),
+                ),
+                "2607",
+            ),
+        )
+
+    async def runways(self, _airport: str):
+        return self._runways
+
+    async def procedures(self, _airport: str, _procedure_type: str):
+        return self._procedures
+
+
+@pytest.mark.anyio
+async def test_runway_options_recommend_compatible_runway() -> None:
+    client = _TerminalClient()
+
+    result = await runway_options(client, "OMDB", "SID")  # type: ignore[arg-type]
+    procedures = await procedure_options(  # type: ignore[arg-type]
+        client, "OMDB", "SID", "30L"
+    )
+
+    assert result.suggested_runway == "30L"
+    assert result.items[0].compatible_procedures == 1
+    assert [item.identifier for item in procedures.items] == ["SENP2F"]
+
+
+@pytest.mark.anyio
+async def test_runway_options_prefer_headwind_over_longer_runway() -> None:
+    client = _TerminalClient()
+    client._procedures = (
+        *client._procedures,
+        AiracProcedure(
+            "ANVI5G",
+            "SID",
+            "12B",
+            (
+                AiracProcedurePoint("DB600", 25.2, 55.3),
+                AiracProcedurePoint("ANVIX", 25.4, 55.6),
+            ),
+            "2607",
+        ),
+    )
+
+    result = await runway_options(  # type: ignore[arg-type]
+        client,
+        "OMDB",
+        "SID",
+        SurfaceWind(
+            speed_kt=20,
+            direction_from_deg=300,
+            valid_at_utc=datetime(2026, 6, 28, 12, tzinfo=UTC),
+        ),
+    )
+
+    assert result.suggested_runway == "30L"
+    selected = next(item for item in result.items if item.suggested)
+    assert selected.headwind_component_kt == pytest.approx(20)
+    assert result.surface_wind_source == "open-meteo"
+
+
+@pytest.mark.anyio
+async def test_explicit_runway_without_procedure_is_rejected() -> None:
+    with pytest.raises(IncompatibleRunwayError):
+        await validate_runway_selection(  # type: ignore[arg-type]
+            _TerminalClient(), "OMDB", "SID", "12R"
+        )
+
+
+def test_navigation_path_connects_sid_airway_and_star() -> None:
+    sid = AiracProcedure(
+        "SENP2F",
+        "SID",
+        "30B",
+        (
+            AiracProcedurePoint("DB570", 25.29, 55.29),
+            AiracProcedurePoint("SENPA", 25.33, 54.53),
+        ),
+        "2607",
+    )
+    star = AiracProcedure(
+        "PRAD4D",
+        "STAR",
+        "32B",
+        (
+            AiracProcedurePoint("PRADO", 40.15, -2.01),
+            AiracProcedurePoint("RUDBI", 40.26, -3.14),
+        ),
+        "2607",
+    )
+    airway_path = (
+        AirwayPathPoint(
+            AiracAirwayPoint("SENPA", 25.33, 54.53, "N571", "2607"), None
+        ),
+        AirwayPathPoint(
+            AiracAirwayPoint("VARUT", 39.2, -0.8, "Z224", "2607"), "N571"
+        ),
+        AirwayPathPoint(
+            AiracAirwayPoint("PRADO", 40.15, -2.01, "Z224", "2607"),
+            "Z224",
+        ),
+    )
+
+    selected_star = _matching_star((star,), airway_path)
+    route = _compose_navigation_path(airway_path, sid, selected_star)
+
+    assert [point.identifier for point in route] == [
+        "DB570",
+        "SENPA",
+        "VARUT",
+        "PRADO",
+        "RUDBI",
+    ]
+    assert route[0].procedure_type == "SID"
+    assert route[-1].procedure_type == "STAR"
+
+
+def test_degraded_oceanic_route_retains_terminal_procedures_and_dct() -> None:
+    result = optimize_still_air(
+        40.47,
+        -3.56,
+        40.64,
+        -73.78,
+        "A320",
+        "minimum_fuel",
+    )
+    assert result.winner is not None
+    sid = AiracProcedure(
+        "VAST2N",
+        "SID",
+        "36B",
+        (
+            AiracProcedurePoint("MD100", 40.6, -3.5),
+            AiracProcedurePoint("VASTO", 41.0, -4.0),
+        ),
+        "2606",
+    )
+    star = AiracProcedure(
+        "CAMRN5",
+        "STAR",
+        "ALL",
+        (
+            AiracProcedurePoint("SIE", 39.1, -74.8),
+            AiracProcedurePoint("CAMRN", 40.02, -73.86),
+        ),
+        "2606",
+    )
+
+    route_points = list(result.winner.waypoints)
+    route_points[0] = route_points[0].model_copy(update={"kind": "airport"})
+    route_points[-1] = route_points[-1].model_copy(update={"kind": "airport"})
+    points = _attach_degraded_terminal_procedures(
+        result.winner, route_points, sid, star
+    )
+
+    assert points[1].procedure_identifier == "VAST2N"
+    first_enroute = next(
+        point
+        for point in points
+        if point.procedure_type is None and point.kind != "airport"
+    )
+    assert first_enroute.inbound_via == "DCT"
+    assert not first_enroute.airway_validated
+    first_star = next(
+        point for point in points if point.procedure_type == "STAR"
+    )
+    assert first_star.inbound_via == "DCT"
+    assert points[-1].inbound_via == "CAMRN5"
+    assert points[-1].cumulative_fuel_kg == pytest.approx(result.winner.fuel_kg)

@@ -17,9 +17,12 @@ from aeroroute_api.application.dto.optimization import (
     OptimizationResponse,
 )
 from aeroroute_api.infrastructure.db.models import (
+    NavigationSnapshot,
     OptimizationRun,
     TrajectoryCandidate,
 )
+
+REQUEST_HASH_VERSION = "optimization-v5-segmented-terminal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +33,12 @@ class RunReservation:
 
 def optimization_request_hash(request: OptimizationRequest) -> str:
     canonical = json.dumps(
-        request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        {
+            "request_hash_version": REQUEST_HASH_VERSION,
+            "request": request.model_dump(mode="json"),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -112,6 +120,9 @@ async def complete_optimization_run(
             for rank, candidate in enumerate(candidates)
         ]
     )
+    navigation_snapshot = _navigation_snapshot(run.id, response)
+    if navigation_snapshot is not None:
+        session.add(navigation_snapshot)
     await session.commit()
     return run
 
@@ -126,3 +137,43 @@ async def fail_optimization_run(
     run.error_code = error_code
     run.completed_at = datetime.now(UTC)
     await session.commit()
+
+
+def _navigation_snapshot(
+    run_id: UUID, response: OptimizationResponse
+) -> NavigationSnapshot | None:
+    winner = response.winner
+    terminal = response.terminal_selection
+    navigation_points = [
+        point.model_dump(mode="json")
+        for point in (winner.waypoints if winner else [])
+        if point.navigation_source or point.procedure_type or point.inbound_via
+    ]
+    if terminal is None and not navigation_points:
+        return None
+    cycles = sorted(
+        {
+            cycle
+            for cycle in [
+                terminal.airac_cycle if terminal else None,
+                *(point.get("airac_cycle") for point in navigation_points),
+            ]
+            if cycle
+        }
+    )
+    return NavigationSnapshot(
+        run_id=run_id,
+        source="airac.net",
+        airac_cycle=", ".join(cycles) if cycles else None,
+        payload_json={
+            "terminal_selection": (
+                terminal.model_dump(mode="json") if terminal else None
+            ),
+            "navigation_points": navigation_points,
+            "data_quality": [
+                flag.model_dump(mode="json")
+                for flag in response.data_quality
+                if "NAVIGATION" in flag.code or "TERMINAL" in flag.code
+            ],
+        },
+    )
