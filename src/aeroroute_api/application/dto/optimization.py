@@ -82,6 +82,8 @@ class WaypointDetail(BaseModel):
     airac_cycle: str | None = None
     airac_region: str | None = None
     snap_distance_nm: float | None = None
+    inbound_via: str | None = None
+    airway_validated: bool | None = None
 
 
 class DataQualityFlag(BaseModel):

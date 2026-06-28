@@ -1,4 +1,3 @@
-
 import httpx
 import pytest
 
@@ -51,6 +50,29 @@ async def test_airac_client_selects_nearest_eligible_fix() -> None:
     assert result.cycle == "2607"
 
 
+@pytest.mark.anyio
+async def test_airac_client_reads_confirmed_airway_route() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["from"] == "ALPOB"
+        assert request.url.params["to"] == "SULAF"
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": [{"identifier": "L768", "segments": []}],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        result = await AiracNavigationClient(http).airway_route(
+            "ALPOB", "SULAF"
+        )
+
+    assert result == ("L768",)
+
+
 class _FixClient:
     async def nearest_fix(
         self, latitude_deg: float, longitude_deg: float, radius_nm: float = 120
@@ -64,6 +86,11 @@ class _FixClient:
             distance_nm=8.5,
             cycle="2607",
         )
+
+    async def airway_route(
+        self, from_identifier: str, to_identifier: str
+    ) -> tuple[str, ...]:
+        return ("L768",)
 
 
 @pytest.mark.anyio
@@ -85,6 +112,8 @@ async def test_enrichment_labels_internal_nodes_with_airac_provenance() -> None:
     assert all(point.kind == "navigation_fix" for point in internal)
     assert all(point.display_name == "SATAR" for point in internal)
     assert all(point.airac_cycle == "2607" for point in internal)
+    assert all(point.inbound_via == "L768" for point in internal[1:])
+    assert all(point.airway_validated for point in internal[1:])
     assert any(
         flag.code == "NAVIGATION_AIRAC" for flag in enriched.data_quality
     )

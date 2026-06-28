@@ -94,6 +94,35 @@ async def enrich_winner_with_airac(
             update={"kind": "airport", "display_name": destination_name}
         )
     )
+    validated_segments = 0
+    navigation_indexes = [
+        index
+        for index, point in enumerate(points)
+        if point.kind == "navigation_fix"
+    ]
+    for previous_index, current_index in zip(
+        navigation_indexes, navigation_indexes[1:]
+    ):
+        previous = points[previous_index]
+        current = points[current_index]
+        try:
+            airways = await client.airway_route(
+                previous.display_name, current.display_name
+            )
+        except AiracProviderError:
+            airways = ()
+        if airways:
+            validated_segments += 1
+            points[current_index] = current.model_copy(
+                update={
+                    "inbound_via": "/".join(airways),
+                    "airway_validated": True,
+                }
+            )
+        else:
+            points[current_index] = current.model_copy(
+                update={"inbound_via": "DCT", "airway_validated": False}
+            )
     enriched = winner.model_copy(update={"waypoints": points})
     cycle_text = ", ".join(sorted(cycles)) if cycles else "current"
     return response.model_copy(
@@ -106,7 +135,8 @@ async def enrich_winner_with_airac(
                     severity="info",
                     message=(
                         f"Navigation references use AIRAC.net cycle {cycle_text}; "
-                        "airway connectivity is not yet validated."
+                        f"{validated_segments} internal segments have confirmed "
+                        "airway connectivity and remaining segments are DCT."
                     ),
                 ),
             ],

@@ -66,3 +66,32 @@ class AiracNavigationClient:
             )
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC waypoint lookup failed") from error
+
+    async def airway_route(
+        self, from_identifier: str, to_identifier: str
+    ) -> tuple[str, ...]:
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/airways/route",
+                params={"from": from_identifier, "to": to_identifier},
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "AeroRoute-MLX/0.1 (development)",
+                },
+            )
+            if response.status_code == 404:
+                return ()
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("status") != "success":
+                return ()
+            routes = payload.get("data", [])
+            if not isinstance(routes, list):
+                raise TypeError("AIRAC airway route data is not a list")
+            return tuple(
+                str(route["identifier"])
+                for route in routes
+                if route.get("identifier")
+            )
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            raise AiracProviderError("AIRAC airway lookup failed") from error
