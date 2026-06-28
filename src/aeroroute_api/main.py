@@ -8,6 +8,7 @@ from aeroroute_api.api.routers.explanations import router as explanations_router
 from aeroroute_api.api.routers.optimizations import (
     router as optimizations_router,
 )
+from aeroroute_api.api.routers.weather import router as weather_router
 from aeroroute_api.api.errors import install_error_handlers
 from aeroroute_api.config import settings
 
@@ -22,6 +23,7 @@ install_error_handlers(app)
 app.include_router(airports_router)
 app.include_router(explanations_router)
 app.include_router(optimizations_router)
+app.include_router(weather_router)
 
 
 @app.middleware("http")
