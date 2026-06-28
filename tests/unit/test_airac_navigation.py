@@ -5,10 +5,13 @@ from aeroroute_api.application.services.navigation import (
     _select_connected_fixes,
     enrich_winner_with_airac,
 )
+from aeroroute_api.application.services.airway_graph import find_airway_path
 from aeroroute_api.application.services.optimization import optimize_still_air
 from aeroroute_api.infrastructure.navigation.airac import (
+    AiracAirwayPoint,
     AiracFix,
     AiracNavigationClient,
+    AiracProviderError,
 )
 
 
@@ -105,6 +108,11 @@ class _FixClient:
     async def airways_for_fix(self, identifier: str) -> tuple[str, ...]:
         return ("L768",)
 
+    async def airway_points(
+        self, identifier: str
+    ) -> tuple[AiracAirwayPoint, ...]:
+        raise AiracProviderError("fixture uses coarse fallback")
+
 
 @pytest.mark.anyio
 async def test_enrichment_labels_internal_nodes_with_airac_provenance() -> None:
@@ -160,3 +168,20 @@ def test_selector_prefers_connected_fixes_over_nearest_dct() -> None:
     )
 
     assert [item.identifier for item in selected if item] == ["CONNA", "CONNB"]
+
+
+def test_airway_graph_crosses_between_airways_at_shared_fix() -> None:
+    def point(identifier: str, airway: str) -> AiracAirwayPoint:
+        return AiracAirwayPoint(identifier, 40, -3, airway, "2607")
+
+    path = find_airway_path(
+        (
+            (point("START", "L768"), point("JOIN", "L768")),
+            (point("JOIN", "M601"), point("GOAL", "M601")),
+        ),
+        {"START"},
+        {"GOAL"},
+    )
+
+    assert [item.point.identifier for item in path] == ["START", "JOIN", "GOAL"]
+    assert [item.inbound_airway for item in path] == [None, "L768", "M601"]

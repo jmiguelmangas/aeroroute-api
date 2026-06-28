@@ -20,11 +20,22 @@ class AiracFix:
     cycle: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class AiracAirwayPoint:
+    identifier: str
+    latitude_deg: float
+    longitude_deg: float
+    airway: str
+    cycle: str | None
+
+
 class AiracNavigationClient:
     base_url = "https://airac.net/api/v1"
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
+        self._membership_cache: dict[str, tuple[str, ...]] = {}
+        self._airway_cache: dict[str, tuple[AiracAirwayPoint, ...]] = {}
 
     async def nearest_fix(
         self, latitude_deg: float, longitude_deg: float, radius_nm: float = 120
@@ -87,6 +98,8 @@ class AiracNavigationClient:
             raise AiracProviderError("AIRAC waypoint lookup failed") from error
 
     async def airways_for_fix(self, identifier: str) -> tuple[str, ...]:
+        if identifier in self._membership_cache:
+            return self._membership_cache[identifier]
         try:
             response = await self._client.get(
                 f"{self.base_url}/airways",
@@ -101,14 +114,52 @@ class AiracNavigationClient:
             routes = payload.get("data", [])
             if not isinstance(routes, list):
                 raise TypeError("AIRAC airway membership data is not a list")
-            return tuple(
+            result = tuple(
                 str(route["identifier"])
                 for route in routes
                 if route.get("identifier")
             )
+            self._membership_cache[identifier] = result
+            return result
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError(
                 "AIRAC airway membership failed"
+            ) from error
+
+    async def airway_points(
+        self, identifier: str
+    ) -> tuple[AiracAirwayPoint, ...]:
+        if identifier in self._airway_cache:
+            return self._airway_cache[identifier]
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/airways/{identifier}",
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "AeroRoute-MLX/0.1 (development)",
+                },
+            )
+            response.raise_for_status()
+            segments = response.json()["data"]["segments"]
+            if not isinstance(segments, list):
+                raise TypeError("AIRAC airway segments are not a list")
+            result = tuple(
+                AiracAirwayPoint(
+                    identifier=str(segment["fix_identifier"]),
+                    latitude_deg=float(segment["fix_coordinates"]["lat"]),
+                    longitude_deg=float(segment["fix_coordinates"]["lon"]),
+                    airway=identifier,
+                    cycle=response.headers.get("X-AIRAC-Cycle"),
+                )
+                for segment in segments
+                if segment.get("fix_identifier")
+                and segment.get("fix_coordinates")
+            )
+            self._airway_cache[identifier] = result
+            return result
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            raise AiracProviderError(
+                "AIRAC airway detail lookup failed"
             ) from error
 
     async def airway_route(
