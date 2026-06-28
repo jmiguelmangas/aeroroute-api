@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import math
 
 from aeroroute_api.application.dto.optimization import (
@@ -17,7 +18,19 @@ from aeroroute_api.infrastructure.navigation.airac import (
     AiracFix,
     AiracNavigationClient,
     AiracProviderError,
+    AiracProcedure,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _NavigationPathPoint:
+    identifier: str
+    latitude_deg: float
+    longitude_deg: float
+    inbound_via: str
+    cycle: str | None
+    procedure_type: str | None = None
+    runway: str | None = None
 
 
 async def enrich_winner_with_airac(
@@ -28,12 +41,23 @@ async def enrich_winner_with_airac(
     if winner is None or len(winner.waypoints) < 2:
         return response
     internal = winner.waypoints[1:-1]
+    sid_procedures: tuple[AiracProcedure, ...] = ()
+    if response.request is not None:
+        try:
+            sid_procedures = await client.procedures(
+                response.request.origin_icao, "SID"
+            )
+        except AiracProviderError:
+            pass
     try:
-        airway_path = await _discover_corridor_path(winner, client)
+        airway_path = await _discover_corridor_path(
+            winner, client, sid_procedures
+        )
     except AiracProviderError:
         airway_path = ()
     if airway_path:
-        return _response_with_connected_path(response, airway_path)
+        sid = _matching_sid(sid_procedures, airway_path)
+        return _response_with_connected_path(response, airway_path, sid)
     try:
         candidate_layers = await asyncio.gather(
             *(
@@ -188,6 +212,7 @@ def _coordinate_name(latitude_deg: float, longitude_deg: float) -> str:
 async def _discover_corridor_path(
     winner: CandidateResponse,
     client: AiracNavigationClient,
+    sid_procedures: tuple[AiracProcedure, ...] = (),
 ) -> tuple[AirwayPathPoint, ...]:
     origin = winner.geometry[0]
     destination = winner.geometry[-1]
@@ -212,6 +237,10 @@ async def _discover_corridor_path(
     identifiers = {
         fix.identifier for layer in candidate_layers for fix in layer
     }
+    sid_exits = {
+        procedure.points[-1].identifier for procedure in sid_procedures
+    }
+    identifiers.update(sid_exits)
     memberships = dict(
         zip(
             identifiers,
@@ -237,12 +266,20 @@ async def _discover_corridor_path(
         for fix in layer
         for airway in memberships[fix.identifier]
     }
+    airway_identifiers.update(
+        airway
+        for identifier in sid_exits
+        for airway in memberships.get(identifier, ())
+    )
     routes = await asyncio.gather(
         *(client.airway_points(identifier) for identifier in airway_identifiers)
     )
+    connected_sid_exits = {
+        identifier for identifier in sid_exits if memberships.get(identifier)
+    }
     return find_airway_path(
         tuple(routes),
-        {fix.identifier for fix in nonempty_layers[0]},
+        connected_sid_exits or {fix.identifier for fix in nonempty_layers[0]},
         {fix.identifier for fix in nonempty_layers[-1]},
     )
 
@@ -250,6 +287,7 @@ async def _discover_corridor_path(
 def _response_with_connected_path(
     response: OptimizationResponse,
     airway_path: tuple[AirwayPathPoint, ...],
+    sid: AiracProcedure | None,
 ) -> OptimizationResponse:
     winner = response.winner
     assert winner is not None
@@ -261,12 +299,10 @@ def _response_with_connected_path(
         if response.request
         else winner.path[-1]
     )
+    navigation_path = _compose_navigation_path(airway_path, sid)
     coordinates = [
         (winner.waypoints[0].latitude_deg, winner.waypoints[0].longitude_deg),
-        *(
-            (item.point.latitude_deg, item.point.longitude_deg)
-            for item in airway_path
-        ),
+        *((item.latitude_deg, item.longitude_deg) for item in navigation_path),
         (winner.waypoints[-1].latitude_deg, winner.waypoints[-1].longitude_deg),
     ]
     segment_distances = [
@@ -287,11 +323,11 @@ def _response_with_connected_path(
         )
     ]
     cycles: set[str] = set()
-    for index, item in enumerate(airway_path, start=1):
+    for index, item in enumerate(navigation_path, start=1):
         cumulative += segment_distances[index - 1]
         fraction = cumulative / total_distance if total_distance else 0.0
-        if item.point.cycle:
-            cycles.add(item.point.cycle)
+        if item.cycle:
+            cycles.add(item.cycle)
         nearest_solver = winner.waypoints[
             min(
                 round(fraction * (len(winner.waypoints) - 1)),
@@ -300,11 +336,11 @@ def _response_with_connected_path(
         ]
         points.append(
             WaypointDetail(
-                node_id=f"AIRAC:{item.point.identifier}:{index}",
-                display_name=item.point.identifier,
+                node_id=f"AIRAC:{item.identifier}:{index}",
+                display_name=item.identifier,
                 kind="navigation_fix",
-                latitude_deg=item.point.latitude_deg,
-                longitude_deg=item.point.longitude_deg,
+                latitude_deg=item.latitude_deg,
+                longitude_deg=item.longitude_deg,
                 flight_level=cruise_level,
                 elapsed_time_s=winner.time_s * fraction,
                 cumulative_distance_m=winner.distance_m * fraction,
@@ -319,9 +355,14 @@ def _response_with_connected_path(
                 ),
                 wind_component_kt=nearest_solver.wind_component_kt,
                 navigation_source="airac.net",
-                airac_cycle=item.point.cycle,
-                inbound_via=item.inbound_airway or "DCT",
-                airway_validated=item.inbound_airway is not None,
+                airac_cycle=item.cycle,
+                inbound_via=item.inbound_via,
+                airway_validated=True,
+                procedure_type=item.procedure_type,
+                procedure_identifier=(
+                    item.inbound_via if item.procedure_type else None
+                ),
+                runway=item.runway,
             )
         )
     points.append(
@@ -346,12 +387,87 @@ def _response_with_connected_path(
                     severity="info",
                     message=(
                         f"AIRAC.net cycle {cycle_text} produced a connected "
-                        f"{len(airway_path)}-fix en-route path; airport joins remain DCT."
+                        f"{len(navigation_path)}-fix path; "
+                        + (
+                            f"SID {sid.identifier} runway family {sid.runway} is "
+                            "connected and the arrival join remains DCT."
+                            if sid
+                            else "airport joins remain DCT."
+                        )
                     ),
                 ),
             ],
         }
     )
+
+
+def _matching_sid(
+    procedures: tuple[AiracProcedure, ...],
+    airway_path: tuple[AirwayPathPoint, ...],
+) -> AiracProcedure | None:
+    positions = {
+        item.point.identifier: index for index, item in enumerate(airway_path)
+    }
+    matches = [
+        procedure
+        for procedure in procedures
+        if procedure.points[-1].identifier in positions
+    ]
+    if not matches:
+        return None
+    return min(
+        matches,
+        key=lambda procedure: (
+            positions[procedure.points[-1].identifier],
+            len(procedure.points),
+        ),
+    )
+
+
+def _compose_navigation_path(
+    airway_path: tuple[AirwayPathPoint, ...],
+    sid: AiracProcedure | None,
+) -> tuple[_NavigationPathPoint, ...]:
+    if sid is None:
+        return tuple(
+            _NavigationPathPoint(
+                item.point.identifier,
+                item.point.latitude_deg,
+                item.point.longitude_deg,
+                item.inbound_airway or "DCT",
+                item.point.cycle,
+            )
+            for item in airway_path
+        )
+    exit_identifier = sid.points[-1].identifier
+    exit_index = next(
+        index
+        for index, item in enumerate(airway_path)
+        if item.point.identifier == exit_identifier
+    )
+    procedure_points = tuple(
+        _NavigationPathPoint(
+            point.identifier,
+            point.latitude_deg,
+            point.longitude_deg,
+            sid.identifier,
+            sid.cycle,
+            "SID",
+            sid.runway,
+        )
+        for point in sid.points
+    )
+    remaining_airway = tuple(
+        _NavigationPathPoint(
+            item.point.identifier,
+            item.point.latitude_deg,
+            item.point.longitude_deg,
+            item.inbound_airway or "DCT",
+            item.point.cycle,
+        )
+        for item in airway_path[exit_index + 1 :]
+    )
+    return (*procedure_points, *remaining_airway)
 
 
 def _distance_m(

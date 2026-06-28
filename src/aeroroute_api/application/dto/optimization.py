@@ -84,6 +84,9 @@ class WaypointDetail(BaseModel):
     snap_distance_nm: float | None = None
     inbound_via: str | None = None
     airway_validated: bool | None = None
+    procedure_type: Literal["SID", "STAR"] | None = None
+    procedure_identifier: str | None = None
+    runway: str | None = None
 
 
 class DataQualityFlag(BaseModel):

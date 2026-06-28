@@ -113,6 +113,9 @@ class _FixClient:
     ) -> tuple[AiracAirwayPoint, ...]:
         raise AiracProviderError("fixture uses coarse fallback")
 
+    async def procedures(self, airport: str, procedure_type: str) -> tuple:
+        return ()
+
 
 @pytest.mark.anyio
 async def test_enrichment_labels_internal_nodes_with_airac_provenance() -> None:
@@ -185,3 +188,46 @@ def test_airway_graph_crosses_between_airways_at_shared_fix() -> None:
 
     assert [item.point.identifier for item in path] == ["START", "JOIN", "GOAL"]
     assert [item.inbound_airway for item in path] == [None, "L768", "M601"]
+
+
+@pytest.mark.anyio
+async def test_airac_client_parses_runway_procedure_points() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/procedures"):
+            return httpx.Response(
+                200,
+                json={"data": [{"identifier": "SENP2F"}]},
+            )
+        return httpx.Response(
+            200,
+            headers={"X-AIRAC-Cycle": "2607"},
+            json={
+                "data": {
+                    "identifier": "SENP2F",
+                    "runway_transitions": {
+                        "30B": [
+                            {
+                                "fix_identifier": "DB570",
+                                "fix_coordinates": {"lat": 25.29, "lon": 55.29},
+                            },
+                            {
+                                "fix_identifier": "SENPA",
+                                "fix_coordinates": {"lat": 25.33, "lon": 54.53},
+                            },
+                        ]
+                    },
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        procedures = await AiracNavigationClient(http).procedures("OMDB", "SID")
+
+    assert procedures[0].identifier == "SENP2F"
+    assert procedures[0].runway == "30B"
+    assert [point.identifier for point in procedures[0].points] == [
+        "DB570",
+        "SENPA",
+    ]

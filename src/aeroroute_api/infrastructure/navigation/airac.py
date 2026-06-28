@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
@@ -29,6 +30,22 @@ class AiracAirwayPoint:
     cycle: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class AiracProcedurePoint:
+    identifier: str
+    latitude_deg: float
+    longitude_deg: float
+
+
+@dataclass(frozen=True, slots=True)
+class AiracProcedure:
+    identifier: str
+    procedure_type: str
+    runway: str
+    points: tuple[AiracProcedurePoint, ...]
+    cycle: str | None
+
+
 class AiracNavigationClient:
     base_url = "https://airac.net/api/v1"
 
@@ -36,6 +53,9 @@ class AiracNavigationClient:
         self._client = client
         self._membership_cache: dict[str, tuple[str, ...]] = {}
         self._airway_cache: dict[str, tuple[AiracAirwayPoint, ...]] = {}
+        self._procedure_cache: dict[
+            tuple[str, str], tuple[AiracProcedure, ...]
+        ] = {}
 
     async def nearest_fix(
         self, latitude_deg: float, longitude_deg: float, radius_nm: float = 120
@@ -190,3 +210,69 @@ class AiracNavigationClient:
             )
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC airway lookup failed") from error
+
+    async def procedures(
+        self, airport: str, procedure_type: str
+    ) -> tuple[AiracProcedure, ...]:
+        cache_key = (airport, procedure_type)
+        if cache_key in self._procedure_cache:
+            return self._procedure_cache[cache_key]
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/procedures",
+                params={"airport": airport, "type": procedure_type},
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "AeroRoute-MLX/0.1 (development)",
+                },
+            )
+            response.raise_for_status()
+            summaries = response.json()["data"]
+            details = await asyncio.gather(
+                *(
+                    self._client.get(
+                        f"{self.base_url}/procedures/{airport}/{summary['identifier']}",
+                        headers={
+                            "Accept": "application/json",
+                            "User-Agent": "AeroRoute-MLX/0.1 (development)",
+                        },
+                    )
+                    for summary in summaries
+                )
+            )
+            result: list[AiracProcedure] = []
+            for detail in details:
+                detail.raise_for_status()
+                data = detail.json()["data"]
+                for runway, segments in data.get(
+                    "runway_transitions", {}
+                ).items():
+                    points = tuple(
+                        AiracProcedurePoint(
+                            identifier=str(segment["fix_identifier"]),
+                            latitude_deg=float(
+                                segment["fix_coordinates"]["lat"]
+                            ),
+                            longitude_deg=float(
+                                segment["fix_coordinates"]["lon"]
+                            ),
+                        )
+                        for segment in segments
+                        if segment.get("fix_identifier")
+                        and segment.get("fix_coordinates")
+                    )
+                    if points:
+                        result.append(
+                            AiracProcedure(
+                                identifier=str(data["identifier"]),
+                                procedure_type=procedure_type,
+                                runway=str(runway),
+                                points=points,
+                                cycle=detail.headers.get("X-AIRAC-Cycle"),
+                            )
+                        )
+            output = tuple(result)
+            self._procedure_cache[cache_key] = output
+            return output
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            raise AiracProviderError("AIRAC procedure lookup failed") from error
