@@ -8,6 +8,7 @@ from aeroroute_api.application.dto.optimization import (
     OptimizationResponse,
 )
 from aeroroute_api.infrastructure.navigation.airac import (
+    AiracFix,
     AiracNavigationClient,
     AiracProviderError,
 )
@@ -22,12 +23,30 @@ async def enrich_winner_with_airac(
         return response
     internal = winner.waypoints[1:-1]
     try:
-        fixes = await asyncio.gather(
+        candidate_layers = await asyncio.gather(
             *(
-                client.nearest_fix(point.latitude_deg, point.longitude_deg)
+                client.nearby_fixes(
+                    point.latitude_deg, point.longitude_deg, limit=5
+                )
                 for point in internal
             )
         )
+        identifiers = {
+            fix.identifier for layer in candidate_layers for fix in layer
+        }
+        memberships = dict(
+            zip(
+                identifiers,
+                await asyncio.gather(
+                    *(
+                        client.airways_for_fix(identifier)
+                        for identifier in identifiers
+                    )
+                ),
+                strict=True,
+            )
+        )
+        fixes = _select_connected_fixes(candidate_layers, memberships)
     except AiracProviderError:
         return response.model_copy(
             update={
@@ -152,3 +171,38 @@ def _coordinate_name(latitude_deg: float, longitude_deg: float) -> str:
         f"{abs(round(longitude_deg)):03d}{'E' if longitude_deg >= 0 else 'W'}"
     )
     return f"{latitude}{longitude}"
+
+
+def _select_connected_fixes(
+    candidate_layers: list[tuple[AiracFix, ...]]
+    | tuple[tuple[AiracFix, ...], ...],
+    memberships: dict[str, tuple[str, ...]],
+) -> tuple[AiracFix | None, ...]:
+    if not candidate_layers:
+        return ()
+    if any(not layer for layer in candidate_layers):
+        return tuple(layer[0] if layer else None for layer in candidate_layers)
+
+    states: dict[AiracFix, tuple[float, tuple[AiracFix, ...]]] = {
+        fix: (fix.distance_nm, (fix,)) for fix in candidate_layers[0]
+    }
+    for layer in candidate_layers[1:]:
+        next_states: dict[AiracFix, tuple[float, tuple[AiracFix, ...]]] = {}
+        for current in layer:
+            best: tuple[float, tuple[AiracFix, ...]] | None = None
+            current_airways = set(memberships.get(current.identifier, ()))
+            for previous, (cost, path) in states.items():
+                shared = current_airways.intersection(
+                    memberships.get(previous.identifier, ())
+                )
+                transition_penalty = 0.0 if shared else 120.0
+                option = (
+                    cost + current.distance_nm + transition_penalty,
+                    path + (current,),
+                )
+                if best is None or option[0] < best[0]:
+                    best = option
+            if best is not None:
+                next_states[current] = best
+        states = next_states
+    return min(states.values(), key=lambda state: state[0])[1]

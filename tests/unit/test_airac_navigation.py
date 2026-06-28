@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from aeroroute_api.application.services.navigation import (
+    _select_connected_fixes,
     enrich_winner_with_airac,
 )
 from aeroroute_api.application.services.optimization import optimize_still_air
@@ -92,6 +93,18 @@ class _FixClient:
     ) -> tuple[str, ...]:
         return ("L768",)
 
+    async def nearby_fixes(
+        self,
+        latitude_deg: float,
+        longitude_deg: float,
+        radius_nm: float = 120,
+        limit: int = 5,
+    ) -> tuple[AiracFix, ...]:
+        return (await self.nearest_fix(latitude_deg, longitude_deg),)
+
+    async def airways_for_fix(self, identifier: str) -> tuple[str, ...]:
+        return ("L768",)
+
 
 @pytest.mark.anyio
 async def test_enrichment_labels_internal_nodes_with_airac_provenance() -> None:
@@ -117,3 +130,33 @@ async def test_enrichment_labels_internal_nodes_with_airac_provenance() -> None:
     assert any(
         flag.code == "NAVIGATION_AIRAC" for flag in enriched.data_quality
     )
+
+
+def test_selector_prefers_connected_fixes_over_nearest_dct() -> None:
+    def fix(identifier: str, distance_nm: float) -> AiracFix:
+        return AiracFix(
+            identifier,
+            40,
+            -3,
+            "LE",
+            "W",
+            distance_nm,
+            "2607",
+        )
+
+    nearest_a = fix("NEARA", 1)
+    connected_a = fix("CONNA", 12)
+    nearest_b = fix("NEARB", 1)
+    connected_b = fix("CONNB", 12)
+
+    selected = _select_connected_fixes(
+        ((nearest_a, connected_a), (nearest_b, connected_b)),
+        {
+            "NEARA": (),
+            "NEARB": (),
+            "CONNA": ("L768",),
+            "CONNB": ("L768",),
+        },
+    )
+
+    assert [item.identifier for item in selected if item] == ["CONNA", "CONNB"]
