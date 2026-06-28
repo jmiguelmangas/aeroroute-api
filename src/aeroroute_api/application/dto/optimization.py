@@ -67,7 +67,9 @@ class GeoJsonGeometry(BaseModel):
 class WaypointDetail(BaseModel):
     node_id: str
     display_name: str = "Synthetic node"
-    kind: Literal["synthetic"] = "synthetic"
+    kind: Literal[
+        "airport", "navigation_fix", "oceanic_coordinate", "synthetic"
+    ] = "synthetic"
     latitude_deg: float
     longitude_deg: float
     flight_level: int
@@ -76,6 +78,10 @@ class WaypointDetail(BaseModel):
     cumulative_fuel_kg: float
     estimated_mass_kg: float
     wind_component_kt: float | None = None
+    navigation_source: str | None = None
+    airac_cycle: str | None = None
+    airac_region: str | None = None
+    snap_distance_nm: float | None = None
 
 
 class DataQualityFlag(BaseModel):

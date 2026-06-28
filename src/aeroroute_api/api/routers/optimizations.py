@@ -17,6 +17,9 @@ from aeroroute_api.application.services.optimization import (
     optimize_still_air,
     optimize_with_weather,
 )
+from aeroroute_api.application.services.navigation import (
+    enrich_winner_with_airac,
+)
 from aeroroute_api.application.services.execution_guard import (
     OptimizationCapacityExceeded,
     OptimizationDeadlineExceeded,
@@ -33,10 +36,12 @@ from aeroroute_api.infrastructure.weather.cache import CachedWeatherPort
 from aeroroute_api.infrastructure.weather.open_meteo import (
     OpenMeteoWeatherClient,
 )
+from aeroroute_api.infrastructure.navigation.airac import AiracNavigationClient
 
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
 _weather_client = httpx.AsyncClient(timeout=5.0)
 _weather = CachedWeatherPort(OpenMeteoWeatherClient(_weather_client))
+_navigation_client = AiracNavigationClient(httpx.AsyncClient(timeout=5.0))
 _limits = settings()
 _execution_guard = OptimizationExecutionGuard(
     max_concurrent=_limits.optimization_max_concurrent,
@@ -184,5 +189,6 @@ async def create_optimization(
             "The optimization could not be completed.",
         ) from error
     response = response.model_copy(update={"request": request})
+    response = await enrich_winner_with_airac(response, _navigation_client)
     completed = await complete_optimization_run(session, run.id, response)
     return response.model_copy(update={"run_id": str(completed.id)})
