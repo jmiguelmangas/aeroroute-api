@@ -24,6 +24,9 @@ class OptimizationRequest(BaseModel):
     final_reserve_minutes: float | None = Field(
         default=None, ge=0.0, le=120.0
     )
+    payload_mass_kg: float | None = Field(
+        default=None, ge=0.0, le=100_000.0
+    )
 
 
 class TerminalSelection(BaseModel):

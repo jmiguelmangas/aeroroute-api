@@ -159,3 +159,24 @@ class NavigationSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class FlightPlanRecord(Base):
+    __tablename__ = "flight_plans"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    optimization_run_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("optimization_runs.id"),
+        nullable=False,
+    )
+    request_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    input_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    output_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

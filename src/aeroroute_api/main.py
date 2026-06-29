@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from aeroroute_api.api.routers.airports import router as airports_router
 from aeroroute_api.api.routers.explanations import router as explanations_router
+from aeroroute_api.api.routers.flight_plans import router as flight_plans_router
 from aeroroute_api.api.routers.navigation import router as navigation_router
 from aeroroute_api.api.routers.optimizations import (
     router as optimizations_router,
@@ -13,7 +14,7 @@ from aeroroute_api.api.routers.weather import router as weather_router
 from aeroroute_api.api.errors import install_error_handlers
 from aeroroute_api.config import settings
 
-app = FastAPI(title="AeroRoute MLX API", version="0.3.0")
+app = FastAPI(title="AeroRoute MLX API", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings().cors_allow_origins),
@@ -23,6 +24,7 @@ app.add_middleware(
 install_error_handlers(app)
 app.include_router(airports_router)
 app.include_router(explanations_router)
+app.include_router(flight_plans_router)
 app.include_router(navigation_router)
 app.include_router(optimizations_router)
 app.include_router(weather_router)

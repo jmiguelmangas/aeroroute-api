@@ -35,6 +35,7 @@ def optimize_still_air(
     weather_stale: bool = False,
     weather_fallback: bool = False,
     reserve_mass_assumption_kg: float | None = None,
+    empty_and_payload_mass_kg: float | None = None,
 ) -> OptimizationResponse:
     performance = aircraft_performance(performance_provider)
     optimization = optimizer.optimize_still_air_with_mass_iteration(
@@ -46,6 +47,7 @@ def optimize_still_air(
         profile=optimizer.OptimizationProfile(profile),
         wind_field=wind_field,
         reserve_mass_assumption_kg=reserve_mass_assumption_kg,
+        empty_and_payload_mass_kg=empty_and_payload_mass_kg,
     )
     problem = optimization.problem
     result = optimization.solver_result
@@ -159,6 +161,7 @@ async def optimize_with_weather(
     weather: WeatherPort,
     performance_provider: str = "curated",
     reserve_mass_assumption_kg: float | None = None,
+    empty_and_payload_mass_kg: float | None = None,
 ) -> OptimizationResponse:
     origin = optimizer.GeoPoint(origin_latitude_deg, origin_longitude_deg)
     destination = optimizer.GeoPoint(
@@ -183,6 +186,7 @@ async def optimize_with_weather(
             performance_provider,
             weather_fallback=True,
             reserve_mass_assumption_kg=reserve_mass_assumption_kg,
+            empty_and_payload_mass_kg=empty_and_payload_mass_kg,
         )
     return optimize_still_air(
         origin_latitude_deg,
@@ -196,6 +200,7 @@ async def optimize_with_weather(
         weather_source=snapshot.source,
         weather_stale=snapshot.stale,
         reserve_mass_assumption_kg=reserve_mass_assumption_kg,
+        empty_and_payload_mass_kg=empty_and_payload_mass_kg,
     )
 
 

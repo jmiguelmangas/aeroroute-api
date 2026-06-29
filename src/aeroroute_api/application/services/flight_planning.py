@@ -162,6 +162,11 @@ async def add_preoperational_planning(
             )
 
     mass = optimizer.aircraft_mass_assumptions(request.aircraft_type)
+    empty_and_payload_mass_kg = (
+        planning.operating_empty_mass_kg + request.payload_mass_kg
+        if request.payload_mass_kg is not None
+        else mass.empty_and_payload_mass_kg
+    )
     contingency_percent = (
         request.contingency_percent
         if request.contingency_percent is not None
@@ -180,7 +185,7 @@ async def add_preoperational_planning(
         final_reserve_minutes=final_reserve_minutes,
     )
     calculated = optimizer.build_fuel_plan(
-        empty_and_payload_mass_kg=mass.empty_and_payload_mass_kg,
+        empty_and_payload_mass_kg=empty_and_payload_mass_kg,
         trip_fuel_kg=winner.fuel_kg,
         alternate_fuel_kg=alternate_fuel_kg,
         holding_fuel_flow_kg_s=planning.holding_fuel_flow_kg_s,
@@ -198,6 +203,12 @@ async def add_preoperational_planning(
             f"Final reserve is {final_reserve_minutes:g} minutes at the curated holding-flow assumption.",
             "Alternate fuel scales modeled trip burn by still-air great-circle distance with a 15-minute holding-flow floor.",
             "Taxi and holding flows are curated aircraft-type approximations.",
+            (
+                f"Operating empty mass plus requested payload: "
+                f"{empty_and_payload_mass_kg:,.0f} kg."
+                if request.payload_mass_kg is not None
+                else "Default combined empty-and-payload mass assumption used."
+            ),
         ],
     )
     diversions = await _select_diversions(

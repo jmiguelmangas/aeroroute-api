@@ -2,6 +2,7 @@ import asyncio
 from uuid import UUID
 
 import httpx
+from aeroroute_optimizer import public as optimizer
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -162,6 +163,14 @@ async def create_optimization(
             "AIRAC runway and procedure data are unavailable.",
         ) from error
     configured = settings()
+    planning_assumptions = optimizer.fuel_planning_assumptions(
+        request.aircraft_type
+    )
+    empty_and_payload_mass_kg = (
+        planning_assumptions.operating_empty_mass_kg + request.payload_mass_kg
+        if request.payload_mass_kg is not None
+        else None
+    )
     reservation = await reserve_optimization_run(session, request)
     run = reservation.run
     if not reservation.should_execute:
@@ -192,6 +201,7 @@ async def create_optimization(
                 _weather,
                 configured.aircraft_performance_provider,
                 reserve_mass_assumption_kg,
+                empty_and_payload_mass_kg,
             )
         return optimize_still_air(
             origin.latitude_deg,
@@ -202,6 +212,7 @@ async def create_optimization(
             request.profile,
             configured.aircraft_performance_provider,
             reserve_mass_assumption_kg=reserve_mass_assumption_kg,
+            empty_and_payload_mass_kg=empty_and_payload_mass_kg,
         )
 
     try:
