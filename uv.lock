@@ -12,7 +12,7 @@ resolution-markers = [
 
 [[package]]
 name = "aeroroute-api"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aeroroute-optimizer" },
@@ -62,7 +62,7 @@ dev = [
 
 [[package]]
 name = "aeroroute-optimizer"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "../aeroroute-optimizer" }
 dependencies = [
     { name = "geographiclib" },

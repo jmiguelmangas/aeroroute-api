@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aeroroute_api.api.dependencies import database_session
 from aeroroute_api.api.errors import PublicAPIError
 from aeroroute_api.application.dto.optimization import (
+    DataQualityFlag,
     OptimizationHistoryItem,
     OptimizationRequest,
     OptimizationResponse,
@@ -16,6 +17,9 @@ from aeroroute_api.application.dto.optimization import (
 from aeroroute_api.application.services.optimization import (
     optimize_still_air,
     optimize_with_weather,
+)
+from aeroroute_api.application.services.flight_planning import (
+    add_preoperational_planning,
 )
 from aeroroute_api.application.services.navigation import (
     enrich_winner_with_airac,
@@ -170,7 +174,9 @@ async def create_optimization(
             "An identical optimization is already running.",
         )
 
-    async def execute() -> OptimizationResponse:
+    async def execute(
+        reserve_mass_assumption_kg: float | None = None,
+    ) -> OptimizationResponse:
         if (
             configured.weather_provider == "open_meteo"
             and request.departure_time_utc is not None
@@ -185,6 +191,7 @@ async def create_optimization(
                 request.departure_time_utc,
                 _weather,
                 configured.aircraft_performance_provider,
+                reserve_mass_assumption_kg,
             )
         return optimize_still_air(
             origin.latitude_deg,
@@ -194,12 +201,73 @@ async def create_optimization(
             request.aircraft_type,
             request.profile,
             configured.aircraft_performance_provider,
+            reserve_mass_assumption_kg=reserve_mass_assumption_kg,
         )
 
     try:
-        response = await _execution_guard.run(execute)
-        response = response.model_copy(update={"request": request})
+        catalogue = (
+            await session.scalars(
+                select(Airport).where(
+                    Airport.airport_type.in_(
+                        ("large_airport", "medium_airport")
+                    )
+                )
+            )
+        ).all()
+        reserve_mass: float | None = None
+        mass_converged = False
+        mass_iterations = 0
+        for mass_iterations in range(1, 4):
+            response = await _execution_guard.run(
+                lambda: execute(reserve_mass)
+            )
+            response = response.model_copy(update={"request": request})
+            response = await add_preoperational_planning(
+                response, catalogue, _navigation_client
+            )
+            if response.fuel_plan is None:
+                break
+            updated_reserve_mass = (
+                response.fuel_plan.takeoff_fuel_kg
+                - response.fuel_plan.trip_fuel_kg
+            )
+            if reserve_mass is not None and abs(
+                updated_reserve_mass - reserve_mass
+            ) <= max(50.0, updated_reserve_mass * 0.005):
+                mass_converged = True
+                break
+            reserve_mass = updated_reserve_mass
         response = await enrich_winner_with_airac(response, _navigation_client)
+        response = await add_preoperational_planning(
+            response, catalogue, _navigation_client
+        )
+        if response.fuel_plan is not None:
+            response = response.model_copy(
+                update={
+                    "fuel_plan": response.fuel_plan.model_copy(
+                        update={
+                            "mass_iterations": mass_iterations,
+                            "mass_converged": mass_converged,
+                        }
+                    )
+                }
+            )
+        if not mass_converged:
+            response = response.model_copy(
+                update={
+                    "data_quality": [
+                        *response.data_quality,
+                        DataQualityFlag(
+                            code="FUEL_PLAN_MASS_NOT_CONVERGED",
+                            severity="warning",
+                            message=(
+                                "The bounded fuel-plan mass iteration did not "
+                                "converge."
+                            ),
+                        ),
+                    ]
+                }
+            )
     except OptimizationCapacityExceeded as error:
         await fail_optimization_run(session, run.id, "capacity_exceeded")
         raise PublicAPIError(

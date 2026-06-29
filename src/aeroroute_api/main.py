@@ -13,7 +13,7 @@ from aeroroute_api.api.routers.weather import router as weather_router
 from aeroroute_api.api.errors import install_error_handlers
 from aeroroute_api.config import settings
 
-app = FastAPI(title="AeroRoute MLX API", version="0.2.0")
+app = FastAPI(title="AeroRoute MLX API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings().cors_allow_origins),

@@ -60,6 +60,24 @@ def test_display_geojson_splits_at_antimeridian() -> None:
     assert len(geometry.coordinates) == 2
 
 
+def test_route_mass_accepts_reconciled_non_trip_fuel() -> None:
+    result = optimize_still_air(
+        40.4722,
+        -3.5608,
+        40.6413,
+        -73.7781,
+        "A320",
+        "minimum_fuel",
+        reserve_mass_assumption_kg=7_500,
+    )
+
+    assert result.winner is not None
+    assert result.winner.fuel_breakdown is not None
+    assert result.winner.fuel_breakdown.mass_assumption_fuel_kg == 7_500
+    assert result.fuel_iteration is not None
+    assert result.fuel_iteration.initial_mass_kg > 57_500
+
+
 def test_performance_provider_selection_is_explicit() -> None:
     assert aircraft_performance("CURATED").provenance.provider == "curated"
 

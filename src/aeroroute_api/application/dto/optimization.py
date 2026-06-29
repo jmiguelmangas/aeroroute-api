@@ -14,6 +14,16 @@ class OptimizationRequest(BaseModel):
         default=None, min_length=2, max_length=8
     )
     arrival_runway: str | None = Field(default=None, min_length=2, max_length=8)
+    destination_alternate_icao: str | None = Field(
+        default=None, min_length=3, max_length=8
+    )
+    extra_fuel_kg: float | None = Field(default=None, ge=0.0, le=100_000.0)
+    contingency_percent: float | None = Field(
+        default=None, ge=0.0, le=100.0
+    )
+    final_reserve_minutes: float | None = Field(
+        default=None, ge=0.0, le=120.0
+    )
 
 
 class TerminalSelection(BaseModel):
@@ -67,6 +77,55 @@ class FuelIterationSummary(BaseModel):
     iterations: int
     converged: bool
     warning_code: str | None = None
+
+
+class FuelPlanResponse(BaseModel):
+    policy_identifier: str
+    taxi_fuel_kg: float
+    trip_fuel_kg: float
+    contingency_fuel_kg: float
+    alternate_fuel_kg: float
+    final_reserve_fuel_kg: float
+    extra_fuel_kg: float
+    block_fuel_kg: float
+    takeoff_fuel_kg: float
+    estimated_landing_fuel_kg: float
+    estimated_alternate_arrival_fuel_kg: float
+    ramp_mass_kg: float
+    takeoff_mass_kg: float
+    estimated_landing_mass_kg: float
+    operationally_approved: bool = False
+    mass_iterations: int = 1
+    mass_converged: bool = False
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class DestinationAlternate(BaseModel):
+    icao_code: str
+    name: str
+    distance_from_destination_nm: float
+    estimated_flight_time_minutes: float
+    estimated_fuel_kg: float
+    longest_published_runway_ft: float | None = None
+    runway_compatible: bool
+    selection: Literal["requested", "suggested"]
+    navigation_source: str | None = None
+    airac_cycle: str | None = None
+    operationally_approved: bool = False
+    rationale: list[str] = Field(default_factory=list)
+
+
+class EnrouteDiversion(BaseModel):
+    icao_code: str
+    name: str
+    distance_to_route_nm: float
+    nearest_route_fraction: float
+    longest_published_runway_ft: float | None = None
+    runway_compatible: bool
+    navigation_source: str | None = None
+    airac_cycle: str | None = None
+    operationally_approved: bool = False
+    rationale: list[str] = Field(default_factory=list)
 
 
 class RoutePoint(BaseModel):
@@ -123,6 +182,9 @@ class OptimizationResponse(BaseModel):
     request: OptimizationRequest | None = None
     fuel_iteration: FuelIterationSummary | None = None
     terminal_selection: TerminalSelection | None = None
+    fuel_plan: FuelPlanResponse | None = None
+    destination_alternate: DestinationAlternate | None = None
+    enroute_diversions: list[EnrouteDiversion] = Field(default_factory=list)
 
 
 class OptimizationHistoryItem(BaseModel):
