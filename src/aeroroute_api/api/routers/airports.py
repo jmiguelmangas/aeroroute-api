@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aeroroute_api.api.dependencies import database_session
 from aeroroute_api.application.dto.airports import AirportPage, AirportResponse
 from aeroroute_api.infrastructure.db.models import Airport
+from aeroroute_api.infrastructure.datasets.active_catalogue import (
+    active_airport_snapshot_id,
+)
 
 router = APIRouter(prefix="/api/v1/airports", tags=["airports"])
 
@@ -21,6 +24,7 @@ async def search_airports(
     statement: Select[tuple[Airport]] = (
         select(Airport)
         .where(
+            Airport.snapshot_id == active_airport_snapshot_id(),
             or_(
                 Airport.icao_code.ilike(pattern, escape="\\"),
                 Airport.iata_code.ilike(pattern, escape="\\"),

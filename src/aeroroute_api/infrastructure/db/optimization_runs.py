@@ -166,6 +166,23 @@ def _navigation_snapshot(
         source="airac.net",
         airac_cycle=", ".join(cycles) if cycles else None,
         payload_json={
+            "manifest": {
+                "source": "airac.net",
+                "airac_cycles": cycles,
+                "loading": "on_demand",
+                "route_status": (
+                    "degraded"
+                    if any(
+                        flag.severity == "warning"
+                        and (
+                            "NAVIGATION" in flag.code
+                            or "TERMINAL" in flag.code
+                        )
+                        for flag in response.data_quality
+                    )
+                    else "complete"
+                ),
+            },
             "terminal_selection": (
                 terminal.model_dump(mode="json") if terminal else None
             ),

@@ -120,8 +120,12 @@ async def test_completed_run_persists_navigation_snapshot() -> None:
     assert len(snapshots) == 1
     assert snapshots[0].airac_cycle == "2606"
     terminal = snapshots[0].payload_json["terminal_selection"]
+    manifest = snapshots[0].payload_json["manifest"]
     assert isinstance(terminal, dict)
     assert terminal["sid_identifier"] == "VAST2N"
+    assert manifest["source"] == "airac.net"
+    assert manifest["airac_cycles"] == ["2606"]
+    assert manifest["loading"] == "on_demand"
 
 
 @pytest.mark.anyio

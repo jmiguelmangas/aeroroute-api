@@ -16,6 +16,8 @@ class Settings:
     optimization_max_concurrent: int = 2
     optimization_queue_timeout_s: float = 0.25
     optimization_deadline_s: float = 15.0
+    navigation_timeout_s: float = 5.0
+    navigation_max_concurrent_requests: int = 8
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -52,6 +54,17 @@ def settings() -> Settings:
             os.getenv(
                 "OPTIMIZATION_DEADLINE_S",
                 defaults.optimization_deadline_s,
+            )
+        ),
+        navigation_timeout_s=float(
+            os.getenv(
+                "NAVIGATION_TIMEOUT_S", defaults.navigation_timeout_s
+            )
+        ),
+        navigation_max_concurrent_requests=int(
+            os.getenv(
+                "NAVIGATION_MAX_CONCURRENT_REQUESTS",
+                defaults.navigation_max_concurrent_requests,
             )
         ),
         cors_allow_origins=(

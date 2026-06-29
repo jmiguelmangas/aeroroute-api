@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from time import monotonic
+from typing import Callable, MutableMapping, TypeVar
 
 import httpx
+
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 class AiracProviderError(RuntimeError):
@@ -59,8 +64,20 @@ class AiracRunway:
 class AiracNavigationClient:
     base_url = "https://airac.net/api/v1"
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        cache_ttl_s: float = 6 * 60 * 60,
+        max_concurrent_requests: int = 8,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
         self._client = client
+        self._cache_ttl_s = cache_ttl_s
+        self._clock = clock
+        self._request_slots = asyncio.Semaphore(max_concurrent_requests)
+        self._cache_expiry: dict[tuple[str, object], float] = {}
+        self._observed_cycles: set[str] = set()
         self._membership_cache: dict[str, tuple[str, ...]] = {}
         self._airway_cache: dict[str, tuple[AiracAirwayPoint, ...]] = {}
         self._procedure_cache: dict[
@@ -68,6 +85,15 @@ class AiracNavigationClient:
         ] = {}
         self._runway_cache: dict[str, tuple[AiracRunway, ...]] = {}
         self._airport_cache: dict[str, dict[str, object]] = {}
+
+    def manifest(self) -> dict[str, object]:
+        return {
+            "source": "airac.net",
+            "base_url": self.base_url,
+            "observed_cycles": sorted(self._observed_cycles),
+            "cache_ttl_s": self._cache_ttl_s,
+            "loading": "on_demand",
+        }
 
     async def airport_position(self, airport: str) -> tuple[float, float]:
         data = await self._airport_data(airport)
@@ -83,10 +109,11 @@ class AiracNavigationClient:
 
     async def _airport_data(self, airport: str) -> dict[str, object]:
         airport = airport.upper()
-        if airport in self._airport_cache:
-            return self._airport_cache[airport]
+        cached = self._cached("airport", self._airport_cache, airport)
+        if cached is not None:
+            return cached
         try:
-            response = await self._client.get(
+            response = await self._get(
                 f"{self.base_url}/airports/{airport}",
                 headers={
                     "Accept": "application/json",
@@ -97,16 +124,17 @@ class AiracNavigationClient:
             data = response.json()["data"]
             if not isinstance(data, dict):
                 raise TypeError("AIRAC airport data is not an object")
-            data["_airac_cycle"] = response.headers.get("X-AIRAC-Cycle")
-            self._airport_cache[airport] = data
+            data["_airac_cycle"] = self._cycle(response)
+            self._store("airport", self._airport_cache, airport, data)
             return data
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC airport lookup failed") from error
 
     async def runways(self, airport: str) -> tuple[AiracRunway, ...]:
         airport = airport.upper()
-        if airport in self._runway_cache:
-            return self._runway_cache[airport]
+        cached = self._cached("runway", self._runway_cache, airport)
+        if cached is not None:
+            return cached
         try:
             data = await self._airport_data(airport)
             raw_runways = data.get("runways", [])
@@ -144,7 +172,7 @@ class AiracNavigationClient:
                         )
                     )
             output = tuple(sorted(runways, key=lambda item: item.identifier))
-            self._runway_cache[airport] = output
+            self._store("runway", self._runway_cache, airport, output)
             return output
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC runway lookup failed") from error
@@ -165,7 +193,7 @@ class AiracNavigationClient:
         limit: int = 5,
     ) -> tuple[AiracFix, ...]:
         try:
-            response = await self._client.get(
+            response = await self._get(
                 f"{self.base_url}/waypoints/nearby",
                 params={
                     "latitude": latitude_deg,
@@ -202,7 +230,7 @@ class AiracNavigationClient:
                     ),
                     fix_type=str(item["type"]["code"]),
                     distance_nm=float(item["distance_nm"]),
-                    cycle=response.headers.get("X-AIRAC-Cycle"),
+                    cycle=self._cycle(response),
                 )
                 for item in ordered[:limit]
             )
@@ -210,10 +238,13 @@ class AiracNavigationClient:
             raise AiracProviderError("AIRAC waypoint lookup failed") from error
 
     async def airways_for_fix(self, identifier: str) -> tuple[str, ...]:
-        if identifier in self._membership_cache:
-            return self._membership_cache[identifier]
+        cached = self._cached(
+            "membership", self._membership_cache, identifier
+        )
+        if cached is not None:
+            return cached
         try:
-            response = await self._client.get(
+            response = await self._get(
                 f"{self.base_url}/airways",
                 params={"fix": identifier},
                 headers={
@@ -222,6 +253,7 @@ class AiracNavigationClient:
                 },
             )
             response.raise_for_status()
+            self._cycle(response)
             payload = response.json()
             routes = payload.get("data", [])
             if not isinstance(routes, list):
@@ -231,7 +263,9 @@ class AiracNavigationClient:
                 for route in routes
                 if route.get("identifier")
             )
-            self._membership_cache[identifier] = result
+            self._store(
+                "membership", self._membership_cache, identifier, result
+            )
             return result
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError(
@@ -241,10 +275,11 @@ class AiracNavigationClient:
     async def airway_points(
         self, identifier: str
     ) -> tuple[AiracAirwayPoint, ...]:
-        if identifier in self._airway_cache:
-            return self._airway_cache[identifier]
+        cached = self._cached("airway", self._airway_cache, identifier)
+        if cached is not None:
+            return cached
         try:
-            response = await self._client.get(
+            response = await self._get(
                 f"{self.base_url}/airways/{identifier}",
                 headers={
                     "Accept": "application/json",
@@ -261,13 +296,13 @@ class AiracNavigationClient:
                     latitude_deg=float(segment["fix_coordinates"]["lat"]),
                     longitude_deg=float(segment["fix_coordinates"]["lon"]),
                     airway=identifier,
-                    cycle=response.headers.get("X-AIRAC-Cycle"),
+                    cycle=self._cycle(response),
                 )
                 for segment in segments
                 if segment.get("fix_identifier")
                 and segment.get("fix_coordinates")
             )
-            self._airway_cache[identifier] = result
+            self._store("airway", self._airway_cache, identifier, result)
             return result
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError(
@@ -278,7 +313,7 @@ class AiracNavigationClient:
         self, from_identifier: str, to_identifier: str
     ) -> tuple[str, ...]:
         try:
-            response = await self._client.get(
+            response = await self._get(
                 f"{self.base_url}/airways/route",
                 params={"from": from_identifier, "to": to_identifier},
                 headers={
@@ -289,6 +324,7 @@ class AiracNavigationClient:
             if response.status_code == 404:
                 return ()
             response.raise_for_status()
+            self._cycle(response)
             payload = response.json()
             if payload.get("status") != "success":
                 return ()
@@ -307,10 +343,13 @@ class AiracNavigationClient:
         self, airport: str, procedure_type: str
     ) -> tuple[AiracProcedure, ...]:
         cache_key = (airport, procedure_type)
-        if cache_key in self._procedure_cache:
-            return self._procedure_cache[cache_key]
+        cached = self._cached(
+            "procedure", self._procedure_cache, cache_key
+        )
+        if cached is not None:
+            return cached
         try:
-            response = await self._client.get(
+            response = await self._get(
                 f"{self.base_url}/procedures",
                 params={"airport": airport, "type": procedure_type},
                 headers={
@@ -319,10 +358,11 @@ class AiracNavigationClient:
                 },
             )
             response.raise_for_status()
+            self._cycle(response)
             summaries = response.json()["data"]
             details = await asyncio.gather(
                 *(
-                    self._client.get(
+                    self._get(
                         f"{self.base_url}/procedures/{airport}/{summary['identifier']}",
                         headers={
                             "Accept": "application/json",
@@ -371,14 +411,51 @@ class AiracNavigationClient:
                                 procedure_type=procedure_type,
                                 runway=str(runway),
                                 points=points,
-                                cycle=detail.headers.get("X-AIRAC-Cycle"),
+                                cycle=self._cycle(detail),
                             )
                         )
             output = tuple(result)
-            self._procedure_cache[cache_key] = output
+            self._store(
+                "procedure", self._procedure_cache, cache_key, output
+            )
             return output
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC procedure lookup failed") from error
+
+    def _cycle(self, response: httpx.Response) -> str | None:
+        cycle = response.headers.get("X-AIRAC-Cycle")
+        if cycle:
+            self._observed_cycles.add(cycle)
+        return cycle
+
+    async def _get(self, url: str, **kwargs: object) -> httpx.Response:
+        async with self._request_slots:
+            return await self._client.get(url, **kwargs)
+
+    def _cached(
+        self,
+        namespace: str,
+        cache: MutableMapping[K, V],
+        key: K,
+    ) -> V | None:
+        expiry_key = (namespace, key)
+        if self._cache_expiry.get(expiry_key, 0.0) > self._clock():
+            return cache.get(key)
+        cache.pop(key, None)
+        self._cache_expiry.pop(expiry_key, None)
+        return None
+
+    def _store(
+        self,
+        namespace: str,
+        cache: MutableMapping[K, V],
+        key: K,
+        value: V,
+    ) -> None:
+        cache[key] = value
+        self._cache_expiry[(namespace, key)] = (
+            self._clock() + self._cache_ttl_s
+        )
 
 
 def _bearing_from_runway_identifier(identifier: str) -> float:

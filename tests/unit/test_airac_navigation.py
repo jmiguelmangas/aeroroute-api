@@ -314,6 +314,51 @@ async def test_airac_client_derives_missing_runway_bearing() -> None:
 
 
 @pytest.mark.anyio
+async def test_airac_cache_expires_and_records_cycle_manifest() -> None:
+    calls = 0
+    now = [100.0]
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={"X-AIRAC-Cycle": "2607"},
+            json={
+                "data": {
+                    "runways": [
+                        {
+                            "base_identifier": "16R",
+                            "reciprocal_identifier": "34L",
+                            "length_ft": 13_123,
+                        }
+                    ]
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        client = AiracNavigationClient(
+            http, cache_ttl_s=60, clock=lambda: now[0]
+        )
+        await client.runways("RJAA")
+        await client.runways("RJAA")
+        now[0] = 161.0
+        await client.runways("RJAA")
+
+    assert calls == 2
+    assert client.manifest() == {
+        "source": "airac.net",
+        "base_url": "https://airac.net/api/v1",
+        "observed_cycles": ["2607"],
+        "cache_ttl_s": 60,
+        "loading": "on_demand",
+    }
+
+
+@pytest.mark.anyio
 async def test_airac_client_parses_runway_independent_star() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/procedures"):

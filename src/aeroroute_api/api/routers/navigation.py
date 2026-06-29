@@ -12,6 +12,7 @@ from aeroroute_api.application.services.terminal_options import (
     procedure_options,
     runway_options,
 )
+from aeroroute_api.config import settings
 from aeroroute_api.infrastructure.navigation.airac import (
     AiracNavigationClient,
     AiracProviderError,
@@ -22,7 +23,11 @@ from aeroroute_api.infrastructure.weather.open_meteo import (
 )
 
 router = APIRouter(prefix="/api/v1/airports", tags=["navigation"])
-_client = AiracNavigationClient(httpx.AsyncClient(timeout=8.0))
+_settings = settings()
+_client = AiracNavigationClient(
+    httpx.AsyncClient(timeout=_settings.navigation_timeout_s),
+    max_concurrent_requests=_settings.navigation_max_concurrent_requests,
+)
 _weather = OpenMeteoWeatherClient(httpx.AsyncClient(timeout=8.0))
 
 

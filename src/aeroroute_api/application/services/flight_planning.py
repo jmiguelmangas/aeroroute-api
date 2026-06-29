@@ -222,6 +222,17 @@ async def add_preoperational_planning(
             alternate.icao_code.upper() if alternate is not None else "",
         },
     )
+    if not diversions:
+        quality.append(
+            DataQualityFlag(
+                code="ENROUTE_DIVERSIONS_UNAVAILABLE",
+                severity="warning",
+                message=(
+                    "No runway-compatible en-route diversion candidate was "
+                    "found within 750 NM of the modeled route."
+                ),
+            )
+        )
     return response.model_copy(
         update={
             "fuel_plan": fuel_plan,
@@ -271,7 +282,7 @@ async def _select_diversions(
         ]
         nearest_index = min(range(len(distances)), key=distances.__getitem__)
         fraction = nearest_index / max(len(route) - 1, 1)
-        if 0.1 <= fraction <= 0.9 and distances[nearest_index] <= 500.0:
+        if 0.1 <= fraction <= 0.9 and distances[nearest_index] <= 750.0:
             ranked.append((distances[nearest_index], fraction, airport))
     ranked.sort(key=lambda item: item[0])
     shortlist = ranked[:12]

@@ -36,6 +36,9 @@ from aeroroute_api.application.services.execution_guard import (
 )
 from aeroroute_api.config import settings
 from aeroroute_api.infrastructure.db.models import Airport, OptimizationRun
+from aeroroute_api.infrastructure.datasets.active_catalogue import (
+    active_airport_snapshot_id,
+)
 from aeroroute_api.infrastructure.db.optimization_runs import (
     complete_optimization_run,
     fail_optimization_run,
@@ -51,10 +54,13 @@ from aeroroute_api.infrastructure.navigation.airac import (
 )
 
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
+_limits = settings()
 _weather_client = httpx.AsyncClient(timeout=5.0)
 _weather = CachedWeatherPort(OpenMeteoWeatherClient(_weather_client))
-_navigation_client = AiracNavigationClient(httpx.AsyncClient(timeout=5.0))
-_limits = settings()
+_navigation_client = AiracNavigationClient(
+    httpx.AsyncClient(timeout=_limits.navigation_timeout_s),
+    max_concurrent_requests=_limits.navigation_max_concurrent_requests,
+)
 _execution_guard = OptimizationExecutionGuard(
     max_concurrent=_limits.optimization_max_concurrent,
     queue_timeout_s=_limits.optimization_queue_timeout_s,
@@ -121,6 +127,7 @@ async def create_optimization(
     airports = (
         await session.scalars(
             select(Airport).where(
+                Airport.snapshot_id == active_airport_snapshot_id(),
                 or_(
                     func.upper(Airport.icao_code) == airport_codes[0],
                     func.upper(Airport.icao_code) == airport_codes[1],
@@ -219,6 +226,7 @@ async def create_optimization(
         catalogue = (
             await session.scalars(
                 select(Airport).where(
+                    Airport.snapshot_id == active_airport_snapshot_id(),
                     Airport.airport_type.in_(
                         ("large_airport", "medium_airport")
                     )
@@ -296,6 +304,25 @@ async def create_optimization(
     except asyncio.CancelledError:
         await fail_optimization_run(session, run.id, "request_cancelled")
         raise
+    except ValueError as error:
+        if "mass is outside the supported profile range" in str(error):
+            await fail_optimization_run(
+                session, run.id, "aircraft_mass_outside_profile"
+            )
+            raise PublicAPIError(
+                422,
+                "aircraft_mass_outside_profile",
+                (
+                    "Payload and planned fuel exceed the supported aircraft "
+                    "mass profile; reduce payload or extra fuel."
+                ),
+            ) from error
+        await fail_optimization_run(session, run.id, "optimization_failed")
+        raise PublicAPIError(
+            503,
+            "optimization_failed",
+            "The optimization could not be completed.",
+        ) from error
     except Exception as error:
         await fail_optimization_run(session, run.id, "optimization_failed")
         raise PublicAPIError(
