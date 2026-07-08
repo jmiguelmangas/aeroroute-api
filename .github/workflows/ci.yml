@@ -34,7 +34,7 @@ jobs:
       - name: Check out pinned optimizer dependency
         run: |
           git clone https://github.com/jmiguelmangas/aeroroute-optimizer.git ../aeroroute-optimizer
-          git -C ../aeroroute-optimizer checkout 5bc033c6f2809b059fe27e13f617559c5e59e063
+          git -C ../aeroroute-optimizer checkout 000b3c662d26d50899e9c2efa41968d5e02d4197
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
