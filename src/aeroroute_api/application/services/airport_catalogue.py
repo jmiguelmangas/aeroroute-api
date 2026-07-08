@@ -52,9 +52,7 @@ class CachedAirportCatalogue:
         ]
         return tuple(matches[offset : offset + limit])
 
-    async def _catalogue(
-        self, session: AsyncSession
-    ) -> tuple[Airport, ...]:
+    async def _catalogue(self, session: AsyncSession) -> tuple[Airport, ...]:
         if self._expires_at > self._clock():
             return self._items
         async with self._lock:
@@ -63,9 +61,7 @@ class CachedAirportCatalogue:
             items = (
                 await session.scalars(
                     select(Airport)
-                    .where(
-                        Airport.snapshot_id == active_airport_snapshot_id()
-                    )
+                    .where(Airport.snapshot_id == active_airport_snapshot_id())
                     .order_by(Airport.icao_code)
                 )
             ).all()

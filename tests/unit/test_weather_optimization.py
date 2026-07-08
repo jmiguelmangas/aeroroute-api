@@ -51,8 +51,7 @@ async def test_forecast_snapshot_reaches_solver_and_waypoints() -> None:
         "WEATHER_FORECAST",
     }
     components = [
-        point.wind_component_kt
-        for point in result.winner.waypoints[1:]
+        point.wind_component_kt for point in result.winner.waypoints[1:]
     ]
     assert all(component is not None for component in components)
     assert any(abs(component or 0) > 0 for component in components)

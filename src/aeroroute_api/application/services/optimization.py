@@ -81,9 +81,7 @@ def optimize_still_air(
     else:
         weather_flag = DataQualityFlag(
             code=(
-                "WEATHER_FALLBACK"
-                if weather_fallback
-                else "WEATHER_STILL_AIR"
+                "WEATHER_FALLBACK" if weather_fallback else "WEATHER_STILL_AIR"
             ),
             severity="warning",
             message=(

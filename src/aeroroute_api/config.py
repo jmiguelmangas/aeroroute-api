@@ -59,9 +59,7 @@ def settings() -> Settings:
             )
         ),
         navigation_timeout_s=float(
-            os.getenv(
-                "NAVIGATION_TIMEOUT_S", defaults.navigation_timeout_s
-            )
+            os.getenv("NAVIGATION_TIMEOUT_S", defaults.navigation_timeout_s)
         ),
         navigation_max_concurrent_requests=int(
             os.getenv(
@@ -73,9 +71,7 @@ def settings() -> Settings:
             os.getenv("MAX_REQUEST_BYTES", defaults.max_request_bytes)
         ),
         rate_limit_per_minute=int(
-            os.getenv(
-                "RATE_LIMIT_PER_MINUTE", defaults.rate_limit_per_minute
-            )
+            os.getenv("RATE_LIMIT_PER_MINUTE", defaults.rate_limit_per_minute)
         ),
         cors_allow_origins=(
             tuple(

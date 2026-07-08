@@ -249,9 +249,7 @@ class AiracNavigationClient:
             raise AiracProviderError("AIRAC waypoint lookup failed") from error
 
     async def airways_for_fix(self, identifier: str) -> tuple[str, ...]:
-        cached = self._cached(
-            "membership", self._membership_cache, identifier
-        )
+        cached = self._cached("membership", self._membership_cache, identifier)
         if cached is not None:
             return cached
         try:
@@ -354,9 +352,7 @@ class AiracNavigationClient:
         self, airport: str, procedure_type: str
     ) -> tuple[AiracProcedure, ...]:
         cache_key = (airport, procedure_type)
-        cached = self._cached(
-            "procedure", self._procedure_cache, cache_key
-        )
+        cached = self._cached("procedure", self._procedure_cache, cache_key)
         if cached is not None:
             return cached
         try:
@@ -426,9 +422,7 @@ class AiracNavigationClient:
                             )
                         )
             output = tuple(result)
-            self._store(
-                "procedure", self._procedure_cache, cache_key, output
-            )
+            self._store("procedure", self._procedure_cache, cache_key, output)
             return output
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC procedure lookup failed") from error
@@ -468,9 +462,7 @@ class AiracNavigationClient:
         value: V,
     ) -> None:
         cache[key] = value
-        self._cache_expiry[(namespace, key)] = (
-            self._clock() + self._cache_ttl_s
-        )
+        self._cache_expiry[(namespace, key)] = self._clock() + self._cache_ttl_s
 
 
 def _bearing_from_runway_identifier(identifier: str) -> float:

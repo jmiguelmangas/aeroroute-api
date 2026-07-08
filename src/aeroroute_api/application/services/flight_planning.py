@@ -76,12 +76,16 @@ async def add_preoperational_planning(
         else None
     )
     if requested_code is not None:
-        selected_pool = [by_code[requested_code]] if requested_code in by_code else []
+        selected_pool = (
+            [by_code[requested_code]] if requested_code in by_code else []
+        )
     else:
         selected_pool = [
             airport
             for airport in ranked_alternates
-            if 25.0 <= _distance_nm(destination, _airport_point(airport)) <= 800.0
+            if 25.0
+            <= _distance_nm(destination, _airport_point(airport))
+            <= 800.0
         ][:8]
 
     alternate, alternate_audit = await _select_alternate(
@@ -129,7 +133,8 @@ async def add_preoperational_planning(
             name=alternate.name,
             distance_from_destination_nm=round(alternate_distance_nm, 1),
             estimated_flight_time_minutes=round(
-                alternate_distance_nm * METERS_PER_NM
+                alternate_distance_nm
+                * METERS_PER_NM
                 / average_ground_speed_mps
                 / 60.0,
                 1,
@@ -138,7 +143,9 @@ async def add_preoperational_planning(
             longest_published_runway_ft=alternate_audit.longest_ft,
             runway_compatible=alternate_audit.compatible,
             selection="requested" if requested_code else "suggested",
-            navigation_source=("airac.net" if alternate_audit.available else None),
+            navigation_source=(
+                "airac.net" if alternate_audit.available else None
+            ),
             airac_cycle=alternate_audit.cycle,
             rationale=[
                 (

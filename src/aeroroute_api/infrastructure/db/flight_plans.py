@@ -119,7 +119,9 @@ def coded_route(
 ) -> str:
     winner = optimization.winner
     if winner is None:
-        return f"{request.origin_icao.upper()} {request.destination_icao.upper()}"
+        return (
+            f"{request.origin_icao.upper()} {request.destination_icao.upper()}"
+        )
     tokens = [request.origin_icao.upper()]
     previous_via: str | None = None
     for point in winner.waypoints[1:-1]:

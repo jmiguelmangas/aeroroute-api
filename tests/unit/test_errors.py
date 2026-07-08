@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from aeroroute_api.api.errors import PublicAPIError, install_error_handlers
 from aeroroute_api.main import app
@@ -27,4 +28,38 @@ def test_service_errors_use_stable_public_envelope() -> None:
     assert response.json() == {
         "code": "provider_unavailable",
         "message": "Try again later.",
+    }
+
+
+def test_database_errors_use_stable_public_envelope() -> None:
+    test_app = FastAPI()
+    install_error_handlers(test_app)
+
+    @test_app.get("/failure")
+    async def failure() -> None:
+        raise SQLAlchemyError("connection refused")
+
+    response = TestClient(test_app).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "database_unavailable",
+        "message": "The flight-planning database is temporarily unavailable.",
+    }
+
+
+def test_database_os_errors_use_stable_public_envelope() -> None:
+    test_app = FastAPI()
+    install_error_handlers(test_app)
+
+    @test_app.get("/failure")
+    async def failure() -> None:
+        raise OSError("connection refused")
+
+    response = TestClient(test_app).get("/failure")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "database_unavailable",
+        "message": "The flight-planning database is temporarily unavailable.",
     }

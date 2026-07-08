@@ -176,7 +176,9 @@ class FlightPlanRecord(Base):
         String(64), nullable=False, unique=True
     )
     input_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
-    output_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    output_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -78,7 +78,9 @@ def airport(code: str) -> SimpleNamespace:
 
 
 @pytest.mark.anyio
-async def test_route_support_accepts_airports_with_terminal_airac_coverage() -> None:
+async def test_route_support_accepts_airports_with_terminal_airac_coverage() -> (
+    None
+):
     result = await assess_route_support(
         "LEMD",
         "KJFK",
@@ -94,7 +96,9 @@ async def test_route_support_accepts_airports_with_terminal_airac_coverage() -> 
 
 
 @pytest.mark.anyio
-async def test_route_support_rejects_airport_missing_from_active_snapshot() -> None:
+async def test_route_support_rejects_airport_missing_from_active_snapshot() -> (
+    None
+):
     result = await assess_route_support(
         "LEMD",
         "ZZZZ",
@@ -109,7 +113,9 @@ async def test_route_support_rejects_airport_missing_from_active_snapshot() -> N
 
 
 @pytest.mark.anyio
-async def test_route_support_returns_stable_provider_unavailable_problem() -> None:
+async def test_route_support_returns_stable_provider_unavailable_problem() -> (
+    None
+):
     result = await assess_route_support(
         "LEMD",
         "KJFK",

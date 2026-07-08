@@ -175,8 +175,7 @@ def _navigation_snapshot(
                     if any(
                         flag.severity == "warning"
                         and (
-                            "NAVIGATION" in flag.code
-                            or "TERMINAL" in flag.code
+                            "NAVIGATION" in flag.code or "TERMINAL" in flag.code
                         )
                         for flag in response.data_quality
                     )

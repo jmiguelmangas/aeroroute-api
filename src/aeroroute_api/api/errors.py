@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 
 class PublicAPIError(RuntimeError):
@@ -15,7 +16,9 @@ class PublicAPIError(RuntimeError):
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(PublicAPIError)
-    async def public_api_error(_: Request, error: PublicAPIError) -> JSONResponse:
+    async def public_api_error(
+        _: Request, error: PublicAPIError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=error.status_code,
             content={"code": error.code, "message": error.message},
@@ -33,3 +36,23 @@ def install_error_handlers(app: FastAPI) -> None:
                 "details": error.errors(),
             },
         )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def database_error(_: Request, __: SQLAlchemyError) -> JSONResponse:
+        return _database_unavailable_response()
+
+    @app.exception_handler(OSError)
+    async def database_os_error(_: Request, __: OSError) -> JSONResponse:
+        return _database_unavailable_response()
+
+
+def _database_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "code": "database_unavailable",
+            "message": (
+                "The flight-planning database is temporarily unavailable."
+            ),
+        },
+    )

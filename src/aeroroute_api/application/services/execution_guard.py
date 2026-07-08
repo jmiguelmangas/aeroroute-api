@@ -34,9 +34,7 @@ class OptimizationExecutionGuard:
         self._queue_timeout_s = queue_timeout_s
         self._execution_timeout_s = execution_timeout_s
 
-    async def run(
-        self, operation: Callable[[], Awaitable[ResultT]]
-    ) -> ResultT:
+    async def run(self, operation: Callable[[], Awaitable[ResultT]]) -> ResultT:
         try:
             await asyncio.wait_for(
                 self._semaphore.acquire(), timeout=self._queue_timeout_s

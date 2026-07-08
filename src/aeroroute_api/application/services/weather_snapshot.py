@@ -52,7 +52,11 @@ async def build_route_weather_snapshot(
         target = departure + timedelta(hours=8 * layer / layers)
         targets[layer] = target
         earlier = target.replace(minute=0, second=0, microsecond=0)
-        times = (earlier,) if target == earlier else (earlier, earlier + timedelta(hours=1))
+        times = (
+            (earlier,)
+            if target == earlier
+            else (earlier, earlier + timedelta(hours=1))
+        )
         for at_utc in times:
             for pressure_hpa in (300, 250, 200):
                 requests.append(
@@ -87,19 +91,17 @@ async def build_route_weather_snapshot(
             for altitude_m in cruise_levels_m:
                 lower, upper = _height_bracket(ordered, altitude_m)
                 sample = interpolate_height(
-                    HeightWindSample(
-                        lower.geopotential_height_m, lower
-                    ),
-                    HeightWindSample(
-                        upper.geopotential_height_m, upper
-                    ),
+                    HeightWindSample(lower.geopotential_height_m, lower),
+                    HeightWindSample(upper.geopotential_height_m, upper),
                     altitude_m,
                 )
                 vectors[(layer, altitude_m)] = optimizer.WindVector(
                     sample.east_mps, sample.north_mps
                 )
     except Exception as error:
-        raise WeatherSnapshotError("route weather snapshot unavailable") from error
+        raise WeatherSnapshotError(
+            "route weather snapshot unavailable"
+        ) from error
     return RouteWeatherSnapshot(
         vectors=vectors,
         source=samples[0].source,

@@ -39,8 +39,7 @@ async def assess_route_support(
                     code="airport_not_supported",
                     airport_icao=code,
                     message=(
-                        f"{code} is not present in the active airport "
-                        "snapshot."
+                        f"{code} is not present in the active airport snapshot."
                     ),
                 )
             )
@@ -108,7 +107,9 @@ async def _airport_coverage(
     procedure_type: str,
 ) -> RouteSupportAirportCoverage:
     options = await runway_options(
-        navigation, airport_icao, procedure_type  # type: ignore[arg-type]
+        navigation,
+        airport_icao,
+        procedure_type,  # type: ignore[arg-type]
     )
     compatible_count = sum(item.compatible_procedures for item in options.items)
     return RouteSupportAirportCoverage(
@@ -131,9 +132,7 @@ def _response(
     *,
     status: str,
 ) -> RouteSupportResponse:
-    cycles = sorted(
-        {item.airac_cycle for item in airports if item.airac_cycle}
-    )
+    cycles = sorted({item.airac_cycle for item in airports if item.airac_cycle})
     return RouteSupportResponse(
         origin_icao=origin_icao,
         destination_icao=destination_icao,

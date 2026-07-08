@@ -110,9 +110,7 @@ def render_flight_plan_pdf(plan: FlightPlanResponse) -> bytes:
             KeepTogether(
                 [
                     Paragraph("Sources and limitations", section),
-                    Paragraph(
-                        _safe("; ".join(result.assumptions or [])), body
-                    ),
+                    Paragraph(_safe("; ".join(result.assumptions or [])), body),
                     Spacer(1, 2 * mm),
                     Paragraph(_safe(plan.disclaimer), warning),
                 ]
@@ -133,12 +131,48 @@ def _summary_table(plan: FlightPlanResponse, body: ParagraphStyle) -> Table:
     terminal = result.terminal_selection
     winner = result.winner
     rows = [
-        ["Plan ID", plan.flight_plan_id, "Created", plan.created_at.isoformat()],
-        ["Callsign", request.callsign or "-", "Aircraft", request.aircraft_type],
-        ["Route", f"{request.origin_icao} - {request.destination_icao}", "Payload", _kg(request.payload_mass_kg)],
-        ["Departure", _terminal(terminal.departure_runway if terminal else None, terminal.sid_identifier if terminal else None), "Arrival", _terminal(terminal.arrival_runway if terminal else None, terminal.star_identifier if terminal else None)],
-        ["Distance", f"{winner.distance_m / 1852:,.0f} NM" if winner else "-", "Time", f"{winner.time_s / 60:,.0f} min" if winner else "-"],
-        ["AIRAC", terminal.airac_cycle if terminal else "-", "Algorithm", result.algorithm_version],
+        [
+            "Plan ID",
+            plan.flight_plan_id,
+            "Created",
+            plan.created_at.isoformat(),
+        ],
+        [
+            "Callsign",
+            request.callsign or "-",
+            "Aircraft",
+            request.aircraft_type,
+        ],
+        [
+            "Route",
+            f"{request.origin_icao} - {request.destination_icao}",
+            "Payload",
+            _kg(request.payload_mass_kg),
+        ],
+        [
+            "Departure",
+            _terminal(
+                terminal.departure_runway if terminal else None,
+                terminal.sid_identifier if terminal else None,
+            ),
+            "Arrival",
+            _terminal(
+                terminal.arrival_runway if terminal else None,
+                terminal.star_identifier if terminal else None,
+            ),
+        ],
+        [
+            "Distance",
+            f"{winner.distance_m / 1852:,.0f} NM" if winner else "-",
+            "Time",
+            f"{winner.time_s / 60:,.0f} min" if winner else "-",
+        ],
+        [
+            "AIRAC",
+            terminal.airac_cycle if terminal else "-",
+            "Algorithm",
+            result.algorithm_version,
+        ],
     ]
     return _key_value_table(rows, body)
 
@@ -146,11 +180,36 @@ def _summary_table(plan: FlightPlanResponse, body: ParagraphStyle) -> Table:
 def _fuel_table(fuel: object, body: ParagraphStyle) -> Table:
     rows = [
         ["Taxi", _kg(fuel.taxi_fuel_kg), "Trip", _kg(fuel.trip_fuel_kg)],
-        ["Contingency", _kg(fuel.contingency_fuel_kg), "Alternate", _kg(fuel.alternate_fuel_kg)],
-        ["Final reserve", _kg(fuel.final_reserve_fuel_kg), "Extra", _kg(fuel.extra_fuel_kg)],
-        ["Block fuel", _kg(fuel.block_fuel_kg), "Takeoff fuel", _kg(fuel.takeoff_fuel_kg)],
-        ["Ramp mass", _kg(fuel.ramp_mass_kg), "Takeoff mass", _kg(fuel.takeoff_mass_kg)],
-        ["Landing mass", _kg(fuel.estimated_landing_mass_kg), "Mass iteration", f"{fuel.mass_iterations} ({'converged' if fuel.mass_converged else 'not converged'})"],
+        [
+            "Contingency",
+            _kg(fuel.contingency_fuel_kg),
+            "Alternate",
+            _kg(fuel.alternate_fuel_kg),
+        ],
+        [
+            "Final reserve",
+            _kg(fuel.final_reserve_fuel_kg),
+            "Extra",
+            _kg(fuel.extra_fuel_kg),
+        ],
+        [
+            "Block fuel",
+            _kg(fuel.block_fuel_kg),
+            "Takeoff fuel",
+            _kg(fuel.takeoff_fuel_kg),
+        ],
+        [
+            "Ramp mass",
+            _kg(fuel.ramp_mass_kg),
+            "Takeoff mass",
+            _kg(fuel.takeoff_mass_kg),
+        ],
+        [
+            "Landing mass",
+            _kg(fuel.estimated_landing_mass_kg),
+            "Mass iteration",
+            f"{fuel.mass_iterations} ({'converged' if fuel.mass_converged else 'not converged'})",
+        ],
     ]
     return _key_value_table(rows, body)
 
@@ -160,9 +219,25 @@ def _alternate_table(plan: FlightPlanResponse, body: ParagraphStyle) -> Table:
     rows = [["Role", "Airport", "Distance", "Runway", "Source"]]
     alternate = result.destination_alternate
     if alternate is not None:
-        rows.append(["Destination", alternate.icao_code, f"{alternate.distance_from_destination_nm:.1f} NM", _ft(alternate.longest_published_runway_ft), _source(alternate.navigation_source, alternate.airac_cycle)])
+        rows.append(
+            [
+                "Destination",
+                alternate.icao_code,
+                f"{alternate.distance_from_destination_nm:.1f} NM",
+                _ft(alternate.longest_published_runway_ft),
+                _source(alternate.navigation_source, alternate.airac_cycle),
+            ]
+        )
     for diversion in result.enroute_diversions:
-        rows.append(["En-route", diversion.icao_code, f"{diversion.distance_to_route_nm:.1f} NM", _ft(diversion.longest_published_runway_ft), _source(diversion.navigation_source, diversion.airac_cycle)])
+        rows.append(
+            [
+                "En-route",
+                diversion.icao_code,
+                f"{diversion.distance_to_route_nm:.1f} NM",
+                _ft(diversion.longest_published_runway_ft),
+                _source(diversion.navigation_source, diversion.airac_cycle),
+            ]
+        )
     if len(rows) == 1:
         rows.append(["-", "No compatible candidate", "-", "-", "-"])
     return _table(rows, body, repeat_rows=1)
@@ -251,7 +326,11 @@ def _footer(canvas: object, doc: object, plan: FlightPlanResponse) -> None:
     canvas.line(14 * mm, 14 * mm, A4[0] - 14 * mm, 14 * mm)
     canvas.setFont("Helvetica", 6.5)
     canvas.setFillColor(colors.HexColor("#5b6b7b"))
-    canvas.drawString(14 * mm, 9.5 * mm, "NOT OPERATIONAL - AeroRoute MLX educational simulation")
+    canvas.drawString(
+        14 * mm,
+        9.5 * mm,
+        "NOT OPERATIONAL - AeroRoute MLX educational simulation",
+    )
     canvas.drawRightString(A4[0] - 14 * mm, 9.5 * mm, f"Page {doc.page}")
     canvas.restoreState()
 

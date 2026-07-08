@@ -14,9 +14,7 @@ def active_airport_snapshot_id():
                 DatasetSnapshot.source_name == "ourairports-csv",
             )
         )
-        .order_by(
-            DatasetSnapshot.imported_at.desc(), DatasetSnapshot.id.desc()
-        )
+        .order_by(DatasetSnapshot.imported_at.desc(), DatasetSnapshot.id.desc())
         .limit(1)
         .scalar_subquery()
     )

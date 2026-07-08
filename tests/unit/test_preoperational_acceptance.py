@@ -8,7 +8,9 @@ from aeroroute_api.application.dto.optimization import OptimizationRequest
 from aeroroute_api.application.services.flight_planning import (
     add_preoperational_planning,
 )
-from aeroroute_api.application.services.navigation import enrich_winner_with_airac
+from aeroroute_api.application.services.navigation import (
+    enrich_winner_with_airac,
+)
 from aeroroute_api.application.services.optimization import optimize_still_air
 from aeroroute_api.infrastructure.navigation.airac import (
     AiracAirwayPoint,
@@ -34,10 +36,54 @@ class Scenario:
 
 
 SCENARIOS = (
-    Scenario("LEMD", "KJFK", 40.4722, -3.5608, 40.6413, -73.7781, "36L", "04L", "KPHL", ("CYQX", "KBGR")),
-    Scenario("KJFK", "LEMD", 40.6413, -73.7781, 40.4722, -3.5608, "04L", "32L", "LEBL", ("CYQX", "LPPT")),
-    Scenario("OMDB", "LEMD", 25.2532, 55.3657, 40.4722, -3.5608, "30R", "32L", "LEBL", ("LIRF", "LGAV")),
-    Scenario("RJAA", "KSFO", 35.7647, 140.3864, 37.6213, -122.3790, "34L", "28L", "KOAK", ("PANC", "PHNL")),
+    Scenario(
+        "LEMD",
+        "KJFK",
+        40.4722,
+        -3.5608,
+        40.6413,
+        -73.7781,
+        "36L",
+        "04L",
+        "KPHL",
+        ("CYQX", "KBGR"),
+    ),
+    Scenario(
+        "KJFK",
+        "LEMD",
+        40.6413,
+        -73.7781,
+        40.4722,
+        -3.5608,
+        "04L",
+        "32L",
+        "LEBL",
+        ("CYQX", "LPPT"),
+    ),
+    Scenario(
+        "OMDB",
+        "LEMD",
+        25.2532,
+        55.3657,
+        40.4722,
+        -3.5608,
+        "30R",
+        "32L",
+        "LEBL",
+        ("LIRF", "LGAV"),
+    ),
+    Scenario(
+        "RJAA",
+        "KSFO",
+        35.7647,
+        140.3864,
+        37.6213,
+        -122.3790,
+        "34L",
+        "28L",
+        "KOAK",
+        ("PANC", "PHNL"),
+    ),
 )
 
 
@@ -128,9 +174,9 @@ class FrozenAirac:
         ranked = sorted(
             self._points,
             key=lambda point: (
-                point.latitude_deg - latitude_deg
-            ) ** 2
-            + (point.longitude_deg - longitude_deg) ** 2,
+                (point.latitude_deg - latitude_deg) ** 2
+                + (point.longitude_deg - longitude_deg) ** 2
+            ),
         )
         return tuple(
             AiracFix(
@@ -146,7 +192,9 @@ class FrozenAirac:
         )
 
     async def airways_for_fix(self, identifier: str) -> tuple[str, ...]:
-        return (self.airway,) if identifier in self._airway_identifiers() else ()
+        return (
+            (self.airway,) if identifier in self._airway_identifiers() else ()
+        )
 
     async def airway_points(
         self, identifier: str
@@ -219,7 +267,9 @@ def test_reference_scenarios_produce_traceable_preoperational_ofp(
     )
 
     assert planned.terminal_selection is not None
-    assert planned.terminal_selection.departure_runway == scenario.departure_runway
+    assert (
+        planned.terminal_selection.departure_runway == scenario.departure_runway
+    )
     assert planned.terminal_selection.arrival_runway == scenario.arrival_runway
     assert planned.terminal_selection.sid_identifier is not None
     assert planned.terminal_selection.star_identifier is not None
@@ -238,13 +288,17 @@ def test_reference_scenarios_produce_traceable_preoperational_ofp(
         for point in route_fixes
         if point.kind == "navigation_fix"
     )
-    assert any(flag.code == "NAVIGATION_AIRWAY_GRAPH" for flag in planned.data_quality)
+    assert any(
+        flag.code == "NAVIGATION_AIRWAY_GRAPH" for flag in planned.data_quality
+    )
 
 
 def _airport_catalogue(scenario: Scenario) -> list[SimpleNamespace]:
     route_diversions = [
         _airport(code, code, scenario, fraction)
-        for code, fraction in zip(scenario.diversions, (0.35, 0.65), strict=True)
+        for code, fraction in zip(
+            scenario.diversions, (0.35, 0.65), strict=True
+        )
     ]
     return [
         _airport(scenario.alternate, scenario.alternate, scenario, 0.96),
@@ -270,4 +324,6 @@ def _interpolated_longitude(scenario: Scenario, fraction: float) -> float:
         (scenario.destination_longitude - scenario.origin_longitude + 180.0)
         % 360.0
     ) - 180.0
-    return ((scenario.origin_longitude + delta * fraction + 180.0) % 360.0) - 180.0
+    return (
+        (scenario.origin_longitude + delta * fraction + 180.0) % 360.0
+    ) - 180.0

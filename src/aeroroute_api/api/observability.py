@@ -55,7 +55,9 @@ class FixedWindowRateLimiter:
 class RequestMetrics:
     def __init__(self) -> None:
         self._requests: dict[tuple[str, str, int], int] = defaultdict(int)
-        self._duration_seconds: dict[tuple[str, str], float] = defaultdict(float)
+        self._duration_seconds: dict[tuple[str, str], float] = defaultdict(
+            float
+        )
         self._lock = Lock()
 
     def record(
@@ -75,7 +77,9 @@ class RequestMetrics:
                 self._requests.items()
             ):
                 labels = _labels(method=method, route=route, status=str(status))
-                lines.append(f"aeroroute_http_requests_total{{{labels}}} {value}")
+                lines.append(
+                    f"aeroroute_http_requests_total{{{labels}}} {value}"
+                )
             lines.extend(
                 [
                     "# HELP aeroroute_http_request_duration_seconds_sum Total request duration.",

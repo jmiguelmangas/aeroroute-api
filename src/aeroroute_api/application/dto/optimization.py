@@ -18,15 +18,9 @@ class OptimizationRequest(BaseModel):
         default=None, min_length=3, max_length=8
     )
     extra_fuel_kg: float | None = Field(default=None, ge=0.0, le=100_000.0)
-    contingency_percent: float | None = Field(
-        default=None, ge=0.0, le=100.0
-    )
-    final_reserve_minutes: float | None = Field(
-        default=None, ge=0.0, le=120.0
-    )
-    payload_mass_kg: float | None = Field(
-        default=None, ge=0.0, le=100_000.0
-    )
+    contingency_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    final_reserve_minutes: float | None = Field(default=None, ge=0.0, le=120.0)
+    payload_mass_kg: float | None = Field(default=None, ge=0.0, le=100_000.0)
 
 
 class TerminalSelection(BaseModel):

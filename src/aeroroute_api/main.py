@@ -109,8 +109,6 @@ def provider_health() -> dict[str, object]:
         "navigation": navigation_provider_health(),
         "explanations": {
             "status": "configured",
-            "provider": (
-                "mlx" if configured.mlx_service_url else "template"
-            ),
+            "provider": ("mlx" if configured.mlx_service_url else "template"),
         },
     }

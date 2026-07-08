@@ -67,13 +67,13 @@ def test_selects_compatible_alternate_and_builds_fuel_plan() -> None:
         airport("KPHL", "Philadelphia", 39.8729, -75.2437),
         airport("CYQX", "Gander", 48.9369, -54.5681),
     ]
-    navigation = FakeNavigation(
-        {"KBOS": 10_083, "KPHL": 9_500, "CYQX": 10_200}
-    )
+    navigation = FakeNavigation({"KBOS": 10_083, "KPHL": 9_500, "CYQX": 10_200})
 
     result = asyncio.run(
         add_preoperational_planning(
-            response(request), catalogue, navigation  # type: ignore[arg-type]
+            response(request),
+            catalogue,
+            navigation,  # type: ignore[arg-type]
         )
     )
 

@@ -141,7 +141,7 @@ async def create_optimization(
                 or_(
                     func.upper(Airport.icao_code) == airport_codes[0],
                     func.upper(Airport.icao_code) == airport_codes[1],
-                )
+                ),
             )
         )
     ).all()
@@ -239,7 +239,7 @@ async def create_optimization(
                     Airport.snapshot_id == active_airport_snapshot_id(),
                     Airport.airport_type.in_(
                         ("large_airport", "medium_airport")
-                    )
+                    ),
                 )
             )
         ).all()
@@ -247,9 +247,7 @@ async def create_optimization(
         mass_converged = False
         mass_iterations = 0
         for mass_iterations in range(1, 4):
-            response = await _execution_guard.run(
-                lambda: execute(reserve_mass)
-            )
+            response = await _execution_guard.run(lambda: execute(reserve_mass))
             response = response.model_copy(update={"request": request})
             response = await add_preoperational_planning(
                 response, catalogue, _navigation_client
