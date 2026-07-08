@@ -42,3 +42,34 @@ class ProcedureOptionsResponse(BaseModel):
     procedure_type: Literal["SID", "STAR"]
     runway: str | None = None
     items: list[ProcedureOption]
+
+
+class RouteSupportAirportCoverage(BaseModel):
+    airport_icao: str
+    procedure_type: Literal["SID", "STAR"]
+    runway_available: bool
+    procedure_available: bool
+    suggested_runway: str | None = None
+    compatible_procedure_count: int = 0
+    airac_cycle: str | None = None
+
+
+class RouteSupportProblem(BaseModel):
+    code: Literal[
+        "airport_not_supported",
+        "navigation_provider_unavailable",
+        "runway_procedure_coverage_missing",
+    ]
+    message: str
+    airport_icao: str | None = None
+
+
+class RouteSupportResponse(BaseModel):
+    origin_icao: str
+    destination_icao: str
+    supported: bool
+    status: Literal["supported", "unsupported", "unavailable"]
+    airac_cycle: str | None = None
+    navigation_manifest: dict[str, object]
+    airports: list[RouteSupportAirportCoverage] = Field(default_factory=list)
+    problems: list[RouteSupportProblem] = Field(default_factory=list)

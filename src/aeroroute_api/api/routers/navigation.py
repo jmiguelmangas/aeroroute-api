@@ -2,17 +2,28 @@ from datetime import datetime
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from aeroroute_api.api.dependencies import database_session
 from aeroroute_api.application.dto.navigation import (
     ProcedureOptionsResponse,
+    RouteSupportResponse,
     RunwayOptionsResponse,
+)
+from aeroroute_api.application.services.route_support import (
+    assess_route_support,
 )
 from aeroroute_api.application.services.terminal_options import (
     procedure_options,
     runway_options,
 )
 from aeroroute_api.config import settings
+from aeroroute_api.infrastructure.datasets.active_catalogue import (
+    active_airport_snapshot_id,
+)
+from aeroroute_api.infrastructure.db.models import Airport
 from aeroroute_api.infrastructure.navigation.airac import (
     AiracNavigationClient,
     AiracProviderError,
@@ -29,6 +40,29 @@ _client = AiracNavigationClient(
     max_concurrent_requests=_settings.navigation_max_concurrent_requests,
 )
 _weather = OpenMeteoWeatherClient(httpx.AsyncClient(timeout=8.0))
+
+
+@router.get("/route-support", response_model=RouteSupportResponse)
+async def route_support(
+    origin_icao: str = Query(min_length=3, max_length=8),
+    destination_icao: str = Query(min_length=3, max_length=8),
+    session: AsyncSession = Depends(database_session),
+) -> RouteSupportResponse:
+    airport_codes = (origin_icao.upper(), destination_icao.upper())
+    airports = (
+        await session.scalars(
+            select(Airport).where(
+                Airport.snapshot_id == active_airport_snapshot_id(),
+                or_(
+                    func.upper(Airport.icao_code) == airport_codes[0],
+                    func.upper(Airport.icao_code) == airport_codes[1],
+                ),
+            )
+        )
+    ).all()
+    return await assess_route_support(
+        airport_codes[0], airport_codes[1], list(airports), _client
+    )
 
 
 @router.get("/{icao}/runways", response_model=RunwayOptionsResponse)
