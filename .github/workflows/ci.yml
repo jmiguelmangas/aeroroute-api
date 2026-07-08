@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned optimizer dependency
         run: |
-          git clone --depth 1 https://github.com/jmiguelmangas/aeroroute-optimizer.git ../aeroroute-optimizer
+          git clone https://github.com/jmiguelmangas/aeroroute-optimizer.git ../aeroroute-optimizer
           git -C ../aeroroute-optimizer checkout 5bc033c6f2809b059fe27e13f617559c5e59e063
       - uses: astral-sh/setup-uv@v6
         with:
