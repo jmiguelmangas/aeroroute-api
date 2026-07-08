@@ -25,7 +25,7 @@ from aeroroute_api.api.observability import (
 )
 from aeroroute_api.config import settings
 
-app = FastAPI(title="AeroRoute MLX API", version="0.7.0")
+app = FastAPI(title="AeroRoute MLX API", version="0.8.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings().cors_allow_origins),

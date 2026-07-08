@@ -18,6 +18,9 @@ class OperationalReadinessResponse(BaseModel):
     requested_mode: OpsMode
     operational_use_enabled: bool
     status: Literal["simulator_only", "blocked", "approved"]
+    evidence_contract_version: str = "1.0.0"
+    evidence_baseline: str
+    hazard_log_baseline: str
     approval_required: bool = True
     regulator_path_identified: bool = False
     operator_profile_present: bool = False

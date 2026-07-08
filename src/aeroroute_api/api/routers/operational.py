@@ -22,6 +22,8 @@ DISCLAIMER = (
     "ICAO-fileable, dispatch-authorized, or suitable for operational or "
     "safety-critical decisions."
 )
+EVIDENCE_BASELINE = "operational-readiness-evidence-2026-07-08"
+HAZARD_LOG_BASELINE = "operational-hazard-log-2026-07-08"
 
 
 @router.get("", response_model=OperationalReadinessResponse)
@@ -81,6 +83,8 @@ async def operational_readiness() -> OperationalReadinessResponse:
         requested_mode=requested_mode,
         operational_use_enabled=False,
         status="simulator_only" if requested_mode == "simulator" else "blocked",
+        evidence_baseline=EVIDENCE_BASELINE,
+        hazard_log_baseline=HAZARD_LOG_BASELINE,
         disclaimer=DISCLAIMER,
         gaps=gaps,
     )

@@ -12,6 +12,12 @@ def test_operational_readiness_defaults_to_simulator_only() -> None:
     assert payload["requested_mode"] == "simulator"
     assert payload["operational_use_enabled"] is False
     assert payload["status"] == "simulator_only"
+    assert payload["evidence_contract_version"] == "1.0.0"
+    assert (
+        payload["evidence_baseline"]
+        == "operational-readiness-evidence-2026-07-08"
+    )
+    assert payload["hazard_log_baseline"] == "operational-hazard-log-2026-07-08"
     assert "not ICAO-fileable" in payload["disclaimer"]
     assert {gap["severity"] for gap in payload["gaps"]} == {"blocking"}
     assert {
