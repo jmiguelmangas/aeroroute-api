@@ -34,5 +34,12 @@ def test_provider_health_reports_deterministic_fallback_when_mlx_is_unconfigured
     response = TestClient(app).get("/health/providers")
 
     assert response.status_code == 200
-    assert response.json()["explanations"] == "template"
-    assert response.json()["weather"] == "still_air"
+    assert response.json()["explanations"] == {
+        "status": "configured",
+        "provider": "template",
+    }
+    assert response.json()["weather"] == {
+        "status": "configured",
+        "provider": "still_air",
+    }
+    assert response.json()["navigation"]["source"] == "airac.net"

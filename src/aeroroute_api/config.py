@@ -18,6 +18,8 @@ class Settings:
     optimization_deadline_s: float = 15.0
     navigation_timeout_s: float = 5.0
     navigation_max_concurrent_requests: int = 8
+    max_request_bytes: int = 1_048_576
+    rate_limit_per_minute: int = 120
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -65,6 +67,14 @@ def settings() -> Settings:
             os.getenv(
                 "NAVIGATION_MAX_CONCURRENT_REQUESTS",
                 defaults.navigation_max_concurrent_requests,
+            )
+        ),
+        max_request_bytes=int(
+            os.getenv("MAX_REQUEST_BYTES", defaults.max_request_bytes)
+        ),
+        rate_limit_per_minute=int(
+            os.getenv(
+                "RATE_LIMIT_PER_MINUTE", defaults.rate_limit_per_minute
             )
         ),
         cors_allow_origins=(

@@ -13,6 +13,7 @@ from aeroroute_api.application.dto.flight_plan import (
 )
 from aeroroute_api.application.dto.optimization import OptimizationRequest
 from aeroroute_api.infrastructure.db.flight_plans import (
+    FlightPlanSnapshotCache,
     flight_plan_response,
     store_flight_plan,
 )
@@ -20,6 +21,7 @@ from aeroroute_api.infrastructure.db.models import FlightPlanRecord
 from aeroroute_api.application.services.ofp_pdf import render_flight_plan_pdf
 
 router = APIRouter(prefix="/api/v1/flight-plans", tags=["flight-plans"])
+_snapshots = FlightPlanSnapshotCache()
 
 
 @router.get("", response_model=list[FlightPlanHistoryItem])
@@ -56,10 +58,7 @@ async def get_flight_plan(
     flight_plan_id: UUID,
     session: AsyncSession = Depends(database_session),
 ) -> FlightPlanResponse:
-    record = await session.get(FlightPlanRecord, flight_plan_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="flight plan not found")
-    return flight_plan_response(record)
+    return await _snapshot(session, flight_plan_id)
 
 
 @router.get("/{flight_plan_id}/pdf")
@@ -67,10 +66,7 @@ async def get_flight_plan_pdf(
     flight_plan_id: UUID,
     session: AsyncSession = Depends(database_session),
 ) -> Response:
-    record = await session.get(FlightPlanRecord, flight_plan_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="flight plan not found")
-    content = render_flight_plan_pdf(flight_plan_response(record))
+    content = render_flight_plan_pdf(await _snapshot(session, flight_plan_id))
     return Response(
         content=content,
         media_type="application/pdf",
@@ -94,4 +90,20 @@ async def create_flight_plan(
     )
     optimization = await create_optimization(optimization_request, session)
     record = await store_flight_plan(session, request, optimization)
-    return flight_plan_response(record)
+    response = flight_plan_response(record)
+    _snapshots.put(response)
+    return response
+
+
+async def _snapshot(
+    session: AsyncSession, flight_plan_id: UUID
+) -> FlightPlanResponse:
+    cached = _snapshots.get(flight_plan_id)
+    if cached is not None:
+        return cached
+    record = await session.get(FlightPlanRecord, flight_plan_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="flight plan not found")
+    response = flight_plan_response(record)
+    _snapshots.put(response)
+    return response

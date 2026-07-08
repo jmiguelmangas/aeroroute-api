@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from uuid import UUID
 
 from sqlalchemy import select
@@ -24,6 +25,25 @@ DISCLAIMER = (
     "operational or safety-critical decisions."
 )
 FLIGHT_PLAN_HASH_VERSION = "flight-plan-v1"
+
+
+class FlightPlanSnapshotCache:
+    def __init__(self, max_entries: int = 128) -> None:
+        self._max_entries = max_entries
+        self._items: OrderedDict[UUID, FlightPlanResponse] = OrderedDict()
+
+    def get(self, flight_plan_id: UUID) -> FlightPlanResponse | None:
+        value = self._items.get(flight_plan_id)
+        if value is not None:
+            self._items.move_to_end(flight_plan_id)
+        return value
+
+    def put(self, value: FlightPlanResponse) -> None:
+        identifier = UUID(value.flight_plan_id)
+        self._items[identifier] = value
+        self._items.move_to_end(identifier)
+        while len(self._items) > self._max_entries:
+            self._items.popitem(last=False)
 
 
 def flight_plan_request_hash(request: FlightPlanRequest) -> str:

@@ -68,6 +68,16 @@ _execution_guard = OptimizationExecutionGuard(
 )
 
 
+def navigation_provider_health() -> dict[str, object]:
+    manifest = _navigation_client.manifest()
+    return {
+        **manifest,
+        "status": (
+            "observed" if manifest["observed_cycles"] else "not_observed"
+        ),
+    }
+
+
 @router.get("", response_model=list[OptimizationHistoryItem])
 async def list_optimizations(
     session: AsyncSession = Depends(database_session),
