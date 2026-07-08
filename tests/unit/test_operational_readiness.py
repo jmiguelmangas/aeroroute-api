@@ -42,3 +42,34 @@ def test_operational_readiness_blocks_requested_operational_mode(
     assert payload["requested_mode"] == "approved_operator_build"
     assert payload["operational_use_enabled"] is False
     assert payload["status"] == "blocked"
+
+
+def test_operational_data_sources_fail_closed_for_ops_candidate(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPS_MODE", "ops_candidate")
+
+    response = TestClient(app).get("/api/v1/operational-data-sources")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active_mode"] == "simulator"
+    assert payload["requested_mode"] == "ops_candidate"
+    assert payload["operational_use_enabled"] is False
+    assert payload["status"] == "blocked"
+    assert payload["data_baseline"] == "operational-data-sources-2026-07-09"
+    assert "notam" in payload["blocking_domains"]
+    assert "aircraft_performance" in payload["blocking_domains"]
+    assert all(
+        source["operational_ready"] is False for source in payload["sources"]
+    )
+    assert {
+        "navdata",
+        "weather",
+        "notam",
+        "airspace_restrictions",
+        "airport_status",
+        "terrain_obstacle",
+        "aircraft_performance",
+        "filing",
+    } == {source["domain"] for source in payload["sources"]}
