@@ -20,6 +20,7 @@ class Settings:
     navigation_max_concurrent_requests: int = 8
     max_request_bytes: int = 1_048_576
     rate_limit_per_minute: int = 120
+    ops_mode: str = "simulator"
     cors_allow_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -73,6 +74,7 @@ def settings() -> Settings:
         rate_limit_per_minute=int(
             os.getenv("RATE_LIMIT_PER_MINUTE", defaults.rate_limit_per_minute)
         ),
+        ops_mode=os.getenv("OPS_MODE", defaults.ops_mode).lower(),
         cors_allow_origins=(
             tuple(
                 origin.strip()
