@@ -354,6 +354,15 @@ async def test_airac_cache_expires_and_records_cycle_manifest() -> None:
         "base_url": "https://airac.net/api/v1",
         "observed_cycles": ["2607"],
         "cache_ttl_s": 60,
+        "cache_entries": {
+            "airports": 1,
+            "airways": 0,
+            "memberships": 0,
+            "procedures": 0,
+            "runways": 1,
+        },
+        "cache_hits": 1,
+        "cache_misses": 4,
         "loading": "on_demand",
     }
 

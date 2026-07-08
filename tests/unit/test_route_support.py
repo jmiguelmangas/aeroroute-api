@@ -14,12 +14,17 @@ from aeroroute_api.infrastructure.navigation.airac import (
 
 
 class FakeNavigation:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self, *, fail: bool = False, missing_procedures: bool = False
+    ) -> None:
         self.fail = fail
+        self.missing_procedures = missing_procedures
 
     async def runways(self, airport: str) -> tuple[AiracRunway, ...]:
         if self.fail:
             raise AiracProviderError("offline")
+        if self.missing_procedures:
+            return ()
         return (
             AiracRunway(
                 identifier="32L" if airport.upper() == "LEMD" else "04L",
@@ -55,6 +60,15 @@ class FakeNavigation:
             "base_url": "https://airac.net/api/v1",
             "observed_cycles": ["2607"] if not self.fail else [],
             "cache_ttl_s": 3600,
+            "cache_entries": {
+                "airports": 0,
+                "airways": 0,
+                "memberships": 0,
+                "procedures": 0,
+                "runways": 0,
+            },
+            "cache_hits": 0,
+            "cache_misses": 0,
             "loading": "on_demand",
         }
 
@@ -106,3 +120,23 @@ async def test_route_support_returns_stable_provider_unavailable_problem() -> No
     assert not result.supported
     assert result.status == "unavailable"
     assert result.problems[0].code == "navigation_provider_unavailable"
+
+
+@pytest.mark.anyio
+async def test_route_support_reports_missing_terminal_coverage() -> None:
+    result = await assess_route_support(
+        "LEMD",
+        "KJFK",
+        [airport("LEMD"), airport("KJFK")],
+        FakeNavigation(missing_procedures=True),  # type: ignore[arg-type]
+    )
+
+    assert not result.supported
+    assert result.status == "unsupported"
+    assert {problem.code for problem in result.problems} == {
+        "runway_procedure_coverage_missing"
+    }
+    assert {problem.airport_icao for problem in result.problems} == {
+        "LEMD",
+        "KJFK",
+    }

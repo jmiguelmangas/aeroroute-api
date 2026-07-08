@@ -85,6 +85,8 @@ class AiracNavigationClient:
         ] = {}
         self._runway_cache: dict[str, tuple[AiracRunway, ...]] = {}
         self._airport_cache: dict[str, dict[str, object]] = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def manifest(self) -> dict[str, object]:
         return {
@@ -92,6 +94,15 @@ class AiracNavigationClient:
             "base_url": self.base_url,
             "observed_cycles": sorted(self._observed_cycles),
             "cache_ttl_s": self._cache_ttl_s,
+            "cache_entries": {
+                "airports": len(self._airport_cache),
+                "airways": len(self._airway_cache),
+                "memberships": len(self._membership_cache),
+                "procedures": len(self._procedure_cache),
+                "runways": len(self._runway_cache),
+            },
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
             "loading": "on_demand",
         }
 
@@ -440,7 +451,11 @@ class AiracNavigationClient:
     ) -> V | None:
         expiry_key = (namespace, key)
         if self._cache_expiry.get(expiry_key, 0.0) > self._clock():
-            return cache.get(key)
+            value = cache.get(key)
+            if value is not None:
+                self._cache_hits += 1
+                return value
+        self._cache_misses += 1
         cache.pop(key, None)
         self._cache_expiry.pop(expiry_key, None)
         return None
