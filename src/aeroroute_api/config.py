@@ -10,7 +10,15 @@ class Settings:
         "postgresql+asyncpg://aeroroute:aeroroute@localhost:55432/aeroroute"
     )
     mlx_service_url: str | None = None
-    mlx_timeout_s: float = 10.0
+    # aeroroute-mlx's own generation.py GenerationSettings defaults
+    # timeout_s to 30.0s for the HTTP service (main.py's create_app default,
+    # not the longer benchmark/quality-corpus script overrides). This client
+    # timeout must comfortably exceed that so the API never abandons a
+    # request the MLX side is still legitimately working on -- previously
+    # this was 10.0s, well under MLX's own 30s ceiling, so a slow-but-valid
+    # generation between 10-30s would be dropped by the client while MLX
+    # kept burning GPU/memory for a response nobody would receive.
+    mlx_timeout_s: float = 35.0
     aircraft_performance_provider: str = "curated"
     weather_provider: str = "still_air"
     optimization_max_concurrent: int = 2

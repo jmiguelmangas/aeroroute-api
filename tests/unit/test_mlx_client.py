@@ -38,3 +38,45 @@ async def test_mlx_client_rejects_invalid_contract_response() -> None:
             await MlxExplanationClient(client, "http://mlx").explain(
                 "summary", []
             )
+
+
+@pytest.mark.anyio
+async def test_mlx_client_rejects_unsupported_numeric_claim() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "contract_version": "1.0.0",
+                    "provider": "mlx",
+                    "text": "Fuel burn is 999 kg.",
+                    "fallback_used": False,
+                },
+            )
+        )
+    ) as client:
+        with pytest.raises(MlxUnavailable):
+            await MlxExplanationClient(client, "http://mlx").explain(
+                "summary", ["1200"]
+            )
+
+
+@pytest.mark.anyio
+async def test_mlx_client_rejects_banned_operational_claim() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "contract_version": "1.0.0",
+                    "provider": "mlx",
+                    "text": "This route is fully ATC-compliant and dispatchable.",
+                    "fallback_used": False,
+                },
+            )
+        )
+    ) as client:
+        with pytest.raises(MlxUnavailable):
+            await MlxExplanationClient(client, "http://mlx").explain(
+                "summary", []
+            )
