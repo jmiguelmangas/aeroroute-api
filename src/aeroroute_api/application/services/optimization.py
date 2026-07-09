@@ -1,5 +1,6 @@
 """Application use case which delegates all route physics to the optimizer."""
 
+import asyncio
 from datetime import datetime
 
 from aeroroute_optimizer import public as optimizer
@@ -174,7 +175,8 @@ async def optimize_with_weather(
             (10_000.0, 11_000.0),
         )
     except WeatherSnapshotError:
-        return optimize_still_air(
+        return await asyncio.to_thread(
+            optimize_still_air,
             origin_latitude_deg,
             origin_longitude_deg,
             destination_latitude_deg,
@@ -186,7 +188,8 @@ async def optimize_with_weather(
             reserve_mass_assumption_kg=reserve_mass_assumption_kg,
             empty_and_payload_mass_kg=empty_and_payload_mass_kg,
         )
-    return optimize_still_air(
+    return await asyncio.to_thread(
+        optimize_still_air,
         origin_latitude_deg,
         origin_longitude_deg,
         destination_latitude_deg,

@@ -220,7 +220,8 @@ async def create_optimization(
                 reserve_mass_assumption_kg,
                 empty_and_payload_mass_kg,
             )
-        return optimize_still_air(
+        return await asyncio.to_thread(
+            optimize_still_air,
             origin.latitude_deg,
             origin.longitude_deg,
             destination.latitude_deg,
