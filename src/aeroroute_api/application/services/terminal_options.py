@@ -1,3 +1,4 @@
+import asyncio
 import math
 from typing import Literal
 
@@ -44,8 +45,9 @@ async def runway_options(
     procedure_type: Literal["SID", "STAR"],
     surface_wind: SurfaceWind | None = None,
 ) -> RunwayOptionsResponse:
-    runways = await client.runways(airport)
-    procedures = await client.procedures(airport, procedure_type)
+    runways, procedures = await asyncio.gather(
+        client.runways(airport), client.procedures(airport, procedure_type)
+    )
     counts = {
         runway.identifier: sum(
             runway_matches_family(runway.identifier, procedure.runway)

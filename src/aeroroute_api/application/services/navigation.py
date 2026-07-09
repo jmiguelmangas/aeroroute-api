@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import math
+from typing import Literal
 
+from aeroroute_api.application.dto.navigation import RunwayOptionsResponse
 from aeroroute_api.application.dto.optimization import (
     CandidateResponse,
     DataQualityFlag,
@@ -25,6 +27,10 @@ from aeroroute_api.infrastructure.navigation.airac import (
     AiracProviderError,
     AiracProcedure,
 )
+
+
+async def _immediate_none() -> None:
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,46 +59,62 @@ async def enrich_winner_with_airac(
     rationale: list[str] = []
     option_cycles: set[str] = set()
     if response.request is not None:
-        departure_runway = response.request.departure_runway
-        arrival_runway = response.request.arrival_runway
-        if departure_runway is None:
+        request = response.request
+        departure_runway = request.departure_runway
+        arrival_runway = request.arrival_runway
+
+        async def _fetch_runway_options(
+            airport: str, procedure_type: Literal["SID", "STAR"]
+        ) -> RunwayOptionsResponse | None:
             try:
-                options = await runway_options(
-                    client, response.request.origin_icao, "SID"
-                )
-                departure_runway = options.suggested_runway
-                rationale.extend(options.recommendation_basis)
-                if options.airac_cycle:
-                    option_cycles.add(options.airac_cycle)
+                return await runway_options(client, airport, procedure_type)
             except AiracProviderError:
-                pass
-        if arrival_runway is None:
+                return None
+
+        departure_options, arrival_options = await asyncio.gather(
+            _fetch_runway_options(request.origin_icao, "SID")
+            if departure_runway is None
+            else _immediate_none(),
+            _fetch_runway_options(request.destination_icao, "STAR")
+            if arrival_runway is None
+            else _immediate_none(),
+        )
+        if departure_options is not None:
+            departure_runway = departure_options.suggested_runway
+            rationale.extend(departure_options.recommendation_basis)
+            if departure_options.airac_cycle:
+                option_cycles.add(departure_options.airac_cycle)
+        if arrival_options is not None:
+            arrival_runway = arrival_options.suggested_runway
+            rationale.extend(arrival_options.recommendation_basis)
+            if arrival_options.airac_cycle:
+                option_cycles.add(arrival_options.airac_cycle)
+
+        async def _fetch_sid_procedures() -> tuple[AiracProcedure, ...] | None:
             try:
-                options = await runway_options(
-                    client, response.request.destination_icao, "STAR"
+                return procedures_for_runway(
+                    await client.procedures(request.origin_icao, "SID"),
+                    departure_runway,
                 )
-                arrival_runway = options.suggested_runway
-                rationale.extend(options.recommendation_basis)
-                if options.airac_cycle:
-                    option_cycles.add(options.airac_cycle)
             except AiracProviderError:
-                pass
-        try:
-            sid_procedures = procedures_for_runway(
-                await client.procedures(response.request.origin_icao, "SID"),
-                departure_runway,
-            )
-        except AiracProviderError:
-            pass
-        try:
-            star_procedures = procedures_for_runway(
-                await client.procedures(
-                    response.request.destination_icao, "STAR"
-                ),
-                arrival_runway,
-            )
-        except AiracProviderError:
-            pass
+                return None
+
+        async def _fetch_star_procedures() -> tuple[AiracProcedure, ...] | None:
+            try:
+                return procedures_for_runway(
+                    await client.procedures(request.destination_icao, "STAR"),
+                    arrival_runway,
+                )
+            except AiracProviderError:
+                return None
+
+        sid_result, star_result = await asyncio.gather(
+            _fetch_sid_procedures(), _fetch_star_procedures()
+        )
+        if sid_result is not None:
+            sid_procedures = sid_result
+        if star_result is not None:
+            star_procedures = star_result
     terminal_selection = TerminalSelection(
         departure_runway=departure_runway,
         departure_runway_suggested=bool(
@@ -239,19 +261,38 @@ async def enrich_winner_with_airac(
         for index, point in enumerate(points)
         if point.kind == "navigation_fix"
     ]
-    for previous_index, current_index in zip(
-        navigation_indexes, navigation_indexes[1:]
-    ):
-        previous = points[previous_index]
-        current = points[current_index]
-        if previous.procedure_type or current.procedure_type:
-            continue
+    segment_pairs = [
+        (previous_index, current_index)
+        for previous_index, current_index in zip(
+            navigation_indexes, navigation_indexes[1:]
+        )
+        if not (
+            points[previous_index].procedure_type
+            or points[current_index].procedure_type
+        )
+    ]
+
+    async def _fetch_airway_route(
+        previous_index: int, current_index: int
+    ) -> tuple[str, ...]:
         try:
-            airways = await client.airway_route(
-                previous.display_name, current.display_name
+            return await client.airway_route(
+                points[previous_index].display_name,
+                points[current_index].display_name,
             )
         except AiracProviderError:
-            airways = ()
+            return ()
+
+    segment_airways = await asyncio.gather(
+        *(
+            _fetch_airway_route(previous_index, current_index)
+            for previous_index, current_index in segment_pairs
+        )
+    )
+    for (previous_index, current_index), airways in zip(
+        segment_pairs, segment_airways, strict=True
+    ):
+        current = points[current_index]
         if airways:
             validated_segments += 1
             points[current_index] = current.model_copy(
