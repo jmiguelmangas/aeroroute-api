@@ -95,6 +95,79 @@ async def test_airac_client_reads_confirmed_airway_route() -> None:
     assert result == ("L768",)
 
 
+@pytest.mark.anyio
+async def test_airac_client_caches_airway_route() -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": [{"identifier": "L768", "segments": []}],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        client = AiracNavigationClient(http)
+        first = await client.airway_route("ALPOB", "SULAF")
+        second = await client.airway_route("ALPOB", "SULAF")
+        # A different endpoint pair must not share the cache entry.
+        await client.airway_route("OTHER", "PAIR")
+
+    assert first == second == ("L768",)
+    assert calls == 2
+    assert client.manifest()["cache_entries"]["airway_routes"] == 2
+    assert client.manifest()["cache_hits"] == 1
+
+
+@pytest.mark.anyio
+async def test_airac_client_caches_nearby_fixes_by_quantized_position() -> (
+    None
+):
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={"X-AIRAC-Cycle": "2607"},
+            json={
+                "status": "success",
+                "data": [
+                    {
+                        "identifier": "BITIS",
+                        "latitude": 40.1,
+                        "longitude": -4.0,
+                        "distance_nm": 12,
+                        "region": "LE",
+                        "type": {"code": "W"},
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    ) as http:
+        client = AiracNavigationClient(http)
+        first = await client.nearby_fixes(40.4700, -3.5600)
+        # Sub-hundredth-of-a-degree jitter (well under the 1.1 km quantization
+        # bucket, negligible against a 120 NM search radius) must reuse the
+        # same cache entry rather than issuing a second request.
+        second = await client.nearby_fixes(40.4701, -3.5599)
+
+    assert first == second
+    assert calls == 1
+    assert client.manifest()["cache_entries"]["nearby_fixes"] == 1
+    assert client.manifest()["cache_hits"] == 1
+
+
 class _FixClient:
     async def nearest_fix(
         self, latitude_deg: float, longitude_deg: float, radius_nm: float = 120
@@ -360,6 +433,8 @@ async def test_airac_cache_expires_and_records_cycle_manifest() -> None:
             "memberships": 0,
             "procedures": 0,
             "runways": 1,
+            "nearby_fixes": 0,
+            "airway_routes": 0,
         },
         "cache_hits": 1,
         "cache_misses": 4,

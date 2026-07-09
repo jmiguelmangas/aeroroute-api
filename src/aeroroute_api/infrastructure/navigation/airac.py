@@ -85,6 +85,10 @@ class AiracNavigationClient:
         ] = {}
         self._runway_cache: dict[str, tuple[AiracRunway, ...]] = {}
         self._airport_cache: dict[str, dict[str, object]] = {}
+        self._nearby_fixes_cache: dict[
+            tuple[float, float, float, int], tuple[AiracFix, ...]
+        ] = {}
+        self._airway_route_cache: dict[tuple[str, str], tuple[str, ...]] = {}
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -100,6 +104,8 @@ class AiracNavigationClient:
                 "memberships": len(self._membership_cache),
                 "procedures": len(self._procedure_cache),
                 "runways": len(self._runway_cache),
+                "nearby_fixes": len(self._nearby_fixes_cache),
+                "airway_routes": len(self._airway_route_cache),
             },
             "cache_hits": self._cache_hits,
             "cache_misses": self._cache_misses,
@@ -203,6 +209,23 @@ class AiracNavigationClient:
         radius_nm: float = 120,
         limit: int = 5,
     ) -> tuple[AiracFix, ...]:
+        # Quantize to ~1.1km (2 decimal degrees) so nearby corridor samples
+        # share a cache entry -- a 120 NM (~222 km) search radius doesn't
+        # meaningfully change over a 1 km query-point shift. This and
+        # airway_route were the two highest-volume, uncached AIRAC calls
+        # (Fable 5 diagnostic finding #7): _discover_corridor_path alone can
+        # issue dozens of nearby_fixes calls per request.
+        cache_key = (
+            round(latitude_deg, 2),
+            round(longitude_deg, 2),
+            radius_nm,
+            limit,
+        )
+        cached = self._cached(
+            "nearby_fixes", self._nearby_fixes_cache, cache_key
+        )
+        if cached is not None:
+            return cached
         try:
             response = await self._get(
                 f"{self.base_url}/waypoints/nearby",
@@ -227,11 +250,14 @@ class AiracNavigationClient:
                 if item.get("type", {}).get("code") in {"C", "R", "W"}
             ]
             if not eligible:
+                self._store(
+                    "nearby_fixes", self._nearby_fixes_cache, cache_key, ()
+                )
                 return ()
             ordered = sorted(
                 eligible, key=lambda value: float(value["distance_nm"])
             )
-            return tuple(
+            result = tuple(
                 AiracFix(
                     identifier=str(item["identifier"]),
                     latitude_deg=float(item["latitude"]),
@@ -245,6 +271,10 @@ class AiracNavigationClient:
                 )
                 for item in ordered[:limit]
             )
+            self._store(
+                "nearby_fixes", self._nearby_fixes_cache, cache_key, result
+            )
+            return result
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC waypoint lookup failed") from error
 
@@ -321,6 +351,12 @@ class AiracNavigationClient:
     async def airway_route(
         self, from_identifier: str, to_identifier: str
     ) -> tuple[str, ...]:
+        cache_key = (from_identifier, to_identifier)
+        cached = self._cached(
+            "airway_route", self._airway_route_cache, cache_key
+        )
+        if cached is not None:
+            return cached
         try:
             response = await self._get(
                 f"{self.base_url}/airways/route",
@@ -331,20 +367,30 @@ class AiracNavigationClient:
                 },
             )
             if response.status_code == 404:
+                self._store(
+                    "airway_route", self._airway_route_cache, cache_key, ()
+                )
                 return ()
             response.raise_for_status()
             self._cycle(response)
             payload = response.json()
             if payload.get("status") != "success":
+                self._store(
+                    "airway_route", self._airway_route_cache, cache_key, ()
+                )
                 return ()
             routes = payload.get("data", [])
             if not isinstance(routes, list):
                 raise TypeError("AIRAC airway route data is not a list")
-            return tuple(
+            result = tuple(
                 str(route["identifier"])
                 for route in routes
                 if route.get("identifier")
             )
+            self._store(
+                "airway_route", self._airway_route_cache, cache_key, result
+            )
+            return result
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AiracProviderError("AIRAC airway lookup failed") from error
 
