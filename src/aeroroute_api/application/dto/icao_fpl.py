@@ -31,6 +31,16 @@ class IcaoFplItemValidation(BaseModel):
     blockers: list[str] = Field(default_factory=list)
 
 
+class AircraftCapabilityProfile(BaseModel):
+    aircraft_type: str
+    capability_baseline: str
+    operator_approval_status: Literal["missing", "accepted"] = "missing"
+    allowed_equipment: list[str] = Field(default_factory=list)
+    requested_equipment: list[str] = Field(default_factory=list)
+    unsupported_equipment: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+
+
 class IcaoFplValidationResponse(BaseModel):
     contract_version: str = "1.0.0"
     baseline: str = "icao-fpl-validation-2026-07-09"
@@ -38,3 +48,4 @@ class IcaoFplValidationResponse(BaseModel):
     filing_enabled: bool = False
     status: Literal["blocked", "invalid"]
     items: list[IcaoFplItemValidation]
+    aircraft_capability: AircraftCapabilityProfile

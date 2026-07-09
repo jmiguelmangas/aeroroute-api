@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from aeroroute_api.application.dto.icao_fpl import (
+    AircraftCapabilityProfile,
     IcaoFplItemValidation,
     IcaoFplValidationRequest,
     IcaoFplValidationResponse,
@@ -114,11 +115,15 @@ MANDATORY_OPERATIONAL_BLOCKERS = [
     "NOTAM, RAD/ATC and airspace restriction data are not operationally available.",
     "Aircraft capability and operator approval records are not accepted.",
 ]
+CAPABILITY_BASELINE = "aircraft-capability-simulator-2026-07-09"
 
 
 def validate_icao_fpl(
     request: IcaoFplValidationRequest,
 ) -> IcaoFplValidationResponse:
+    capability = aircraft_capability_profile(
+        request.aircraft_type, request.equipment
+    )
     items = [
         _item(
             "7",
@@ -137,7 +142,8 @@ def validate_icao_fpl(
         ),
         _item(
             "10",
-            _equipment_allowed(request.aircraft_type, request.equipment),
+            not capability.unsupported_equipment
+            and bool(capability.requested_equipment),
             "Equipment codes exceed the simulator aircraft capability baseline.",
         ),
         _item(
@@ -171,6 +177,7 @@ def validate_icao_fpl(
         if any(not item.valid for item in items)
         else "blocked",
         items=items,
+        aircraft_capability=capability,
     )
 
 
@@ -202,10 +209,36 @@ def _other_information(value: str) -> bool:
     return not value or bool(re.fullmatch(r"[A-Z0-9/ .-]+", value.upper()))
 
 
-def _equipment_allowed(aircraft_type: str, equipment: str) -> bool:
+def aircraft_capability_profile(
+    aircraft_type: str, equipment: str
+) -> AircraftCapabilityProfile:
     allowed = AIRCRAFT_CAPABILITIES.get(aircraft_type.upper())
     if not allowed:
-        return False
+        return AircraftCapabilityProfile(
+            aircraft_type=aircraft_type.upper(),
+            capability_baseline=CAPABILITY_BASELINE,
+            allowed_equipment=[],
+            requested_equipment=_equipment_tokens(equipment),
+            unsupported_equipment=_equipment_tokens(equipment),
+            blockers=[
+                "Aircraft type is not in the simulator capability baseline.",
+                "Operator aircraft capability approval is not accepted.",
+            ],
+        )
+    requested = _equipment_tokens(equipment)
+    unsupported = sorted(set(requested) - allowed)
+    return AircraftCapabilityProfile(
+        aircraft_type=aircraft_type.upper(),
+        capability_baseline=CAPABILITY_BASELINE,
+        allowed_equipment=sorted(allowed),
+        requested_equipment=requested,
+        unsupported_equipment=unsupported,
+        blockers=[
+            "Operator aircraft capability approval is not accepted.",
+        ],
+    )
+
+
+def _equipment_tokens(equipment: str) -> list[str]:
     raw = equipment.split("/")[0]
-    tokens = re.findall(r"[A-Z][0-9]?", raw.upper())
-    return bool(tokens) and set(tokens) <= allowed
+    return re.findall(r"[A-Z][0-9]?", raw.upper())

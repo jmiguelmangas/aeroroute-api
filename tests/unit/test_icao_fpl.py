@@ -46,6 +46,13 @@ def test_icao_fpl_validation_blocks_filing_even_when_items_are_valid() -> None:
         "19",
     }
     assert all("Filing gateway" in item.blockers[0] for item in result.items)
+    assert (
+        result.aircraft_capability.capability_baseline
+        == "aircraft-capability-simulator-2026-07-09"
+    )
+    assert result.aircraft_capability.operator_approval_status == "missing"
+    assert result.aircraft_capability.unsupported_equipment == []
+    assert "J5" in result.aircraft_capability.allowed_equipment
 
 
 def test_icao_fpl_validation_rejects_unapproved_equipment() -> None:
@@ -59,6 +66,11 @@ def test_icao_fpl_validation_rejects_unapproved_equipment() -> None:
     assert result.status == "invalid"
     assert item10.valid is False
     assert "exceed" in item10.blockers[0]
+    assert "J5" in result.aircraft_capability.unsupported_equipment
+    assert (
+        "Operator aircraft capability approval is not accepted."
+        in result.aircraft_capability.blockers
+    )
 
 
 def test_icao_fpl_validation_endpoint_is_non_operational() -> None:
@@ -70,3 +82,7 @@ def test_icao_fpl_validation_endpoint_is_non_operational() -> None:
     payload = response.json()
     assert payload["baseline"] == "icao-fpl-validation-2026-07-09"
     assert payload["filing_enabled"] is False
+    assert (
+        payload["aircraft_capability"]["capability_baseline"]
+        == "aircraft-capability-simulator-2026-07-09"
+    )
