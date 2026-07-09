@@ -18,6 +18,9 @@ from aeroroute_api.api.routers.navigation import router as navigation_router
 from aeroroute_api.api.routers.operational import (
     router as operational_router,
 )
+from aeroroute_api.api.routers.operator_approval import (
+    router as operator_approval_router,
+)
 from aeroroute_api.api.routers.optimizations import (
     navigation_provider_health,
     router as optimizations_router,
@@ -31,7 +34,7 @@ from aeroroute_api.api.observability import (
 )
 from aeroroute_api.config import settings
 
-app = FastAPI(title="AeroRoute MLX API", version="0.12.0")
+app = FastAPI(title="AeroRoute MLX API", version="0.13.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings().cors_allow_origins),
@@ -51,6 +54,7 @@ app.include_router(flight_plans_router)
 app.include_router(icao_fpl_router)
 app.include_router(navigation_router)
 app.include_router(operational_router)
+app.include_router(operator_approval_router)
 app.include_router(optimizations_router)
 app.include_router(weather_router)
 
