@@ -86,13 +86,13 @@ class RequestMetrics:
                     "# TYPE aeroroute_http_request_duration_seconds_sum counter",
                 ]
             )
-            for (method, route), value in sorted(
+            for (method, route), duration in sorted(
                 self._duration_seconds.items()
             ):
                 labels = _labels(method=method, route=route)
                 lines.append(
                     "aeroroute_http_request_duration_seconds_sum"
-                    f"{{{labels}}} {value:.6f}"
+                    f"{{{labels}}} {duration:.6f}"
                 )
         return "\n".join(lines) + "\n"
 

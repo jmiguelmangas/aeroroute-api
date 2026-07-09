@@ -1,14 +1,16 @@
-.PHONY: bootstrap format lint typecheck test build check
+.PHONY: bootstrap format lint typecheck test build contract-verify check
 bootstrap:
 	uv sync --all-groups
 format:
-	uv run ruff format src tests
+	uv run ruff format src tests scripts
 lint:
-	uv run ruff check src tests
+	uv run ruff check src tests scripts
 typecheck:
-	@echo "Type checking will be enabled with Phase 2 persistence models."
+	uv run mypy
 test:
 	uv run pytest
 build:
 	uv build
-check: lint typecheck test build
+contract-verify:
+	uv run python scripts/validate_openapi_contract.py
+check: lint typecheck test build contract-verify
