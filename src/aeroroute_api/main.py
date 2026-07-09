@@ -23,14 +23,18 @@ from aeroroute_api.api.routers.operator_approval import (
 )
 from aeroroute_api.api.routers.optimizations import (
     navigation_provider_health,
+    weather_provider_health,
     router as optimizations_router,
 )
 from aeroroute_api.api.routers.weather import router as weather_router
 from aeroroute_api.api.errors import install_error_handlers
 from aeroroute_api.api.observability import (
     FixedWindowRateLimiter,
-    RequestMetrics,
     log_request,
+    metrics as _metrics,
+)
+from aeroroute_api.application.services.explanation_provider import (
+    explanation_provider_health,
 )
 from aeroroute_api.config import settings
 
@@ -43,7 +47,6 @@ app.add_middleware(
 )
 install_error_handlers(app)
 _settings = settings()
-_metrics = RequestMetrics()
 _rate_limiter = FixedWindowRateLimiter(_settings.rate_limit_per_minute)
 app.include_router(airports_router)
 app.include_router(assurance_router)
@@ -124,10 +127,12 @@ def provider_health() -> dict[str, object]:
         "weather": {
             "status": "configured",
             "provider": configured.weather_provider,
+            **weather_provider_health(),
         },
         "navigation": navigation_provider_health(),
         "explanations": {
             "status": "configured",
             "provider": ("mlx" if configured.mlx_service_url else "template"),
+            **explanation_provider_health(),
         },
     }

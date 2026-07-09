@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from time import monotonic
 from uuid import UUID
 
 import httpx
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aeroroute_api.api.dependencies import database_session
 from aeroroute_api.api.errors import PublicAPIError
+from aeroroute_api.api.observability import metrics as _metrics
 from aeroroute_api.application.dto.optimization import (
     DataQualityFlag,
     OptimizationHistoryItem,
@@ -79,6 +81,10 @@ def navigation_provider_health() -> dict[str, object]:
             "observed" if manifest["observed_cycles"] else "not_observed"
         ),
     }
+
+
+def weather_provider_health() -> dict[str, object]:
+    return _weather.cache_stats()
 
 
 @router.get("", response_model=list[OptimizationHistoryItem])
@@ -236,6 +242,8 @@ async def create_optimization(
             empty_and_payload_mass_kg=empty_and_payload_mass_kg,
         )
 
+    optimization_started_at = monotonic()
+    outcome = "unknown"
     try:
         catalogue = (
             await session.scalars(
@@ -306,7 +314,9 @@ async def create_optimization(
                     ]
                 }
             )
+        outcome = "success"
     except OptimizationCapacityExceeded as error:
+        outcome = "capacity_exceeded"
         await fail_optimization_run(session, run.id, "capacity_exceeded")
         raise PublicAPIError(
             429,
@@ -314,6 +324,7 @@ async def create_optimization(
             "Optimization capacity is temporarily exhausted.",
         ) from error
     except OptimizationDeadlineExceeded as error:
+        outcome = "deadline_exceeded"
         await fail_optimization_run(session, run.id, "deadline_exceeded")
         raise PublicAPIError(
             504,
@@ -321,10 +332,12 @@ async def create_optimization(
             "The optimization exceeded its execution deadline.",
         ) from error
     except asyncio.CancelledError:
+        outcome = "cancelled"
         await fail_optimization_run(session, run.id, "request_cancelled")
         raise
     except ValueError as error:
         if "mass is outside the supported profile range" in str(error):
+            outcome = "aircraft_mass_outside_profile"
             await fail_optimization_run(
                 session, run.id, "aircraft_mass_outside_profile"
             )
@@ -336,6 +349,7 @@ async def create_optimization(
                     "mass profile; reduce payload or extra fuel."
                 ),
             ) from error
+        outcome = "optimization_failed"
         logger.error(
             "optimization_failed run_id=%s exception=%s.%s message=%s",
             run.id,
@@ -351,6 +365,7 @@ async def create_optimization(
             "The optimization could not be completed.",
         ) from error
     except Exception as error:
+        outcome = "optimization_failed"
         logger.error(
             "optimization_failed run_id=%s exception=%s.%s message=%s",
             run.id,
@@ -365,5 +380,9 @@ async def create_optimization(
             "optimization_failed",
             "The optimization could not be completed.",
         ) from error
+    finally:
+        _metrics.record_optimization_duration(
+            outcome, monotonic() - optimization_started_at
+        )
     completed = await complete_optimization_run(session, run.id, response)
     return response.model_copy(update={"run_id": str(completed.id)})

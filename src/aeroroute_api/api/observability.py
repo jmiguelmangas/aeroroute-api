@@ -45,17 +45,43 @@ class FixedWindowRateLimiter:
             window = self._windows.get(client)
             if window is None or now - window.started_at >= 60.0:
                 self._windows[client] = _Window(now, 1)
-                return True
-            if window.count >= self._limit:
-                return False
-            window.count += 1
-            return True
+                result = True
+            elif window.count >= self._limit:
+                result = False
+            else:
+                window.count += 1
+                result = True
+            self._evict_expired(now, skip=client)
+            return result
+
+    def _evict_expired(self, now: float, *, skip: str) -> None:
+        # Opportunistic sweep so `_windows` doesn't grow unboundedly with
+        # one entry per distinct client ever seen -- every call to allow()
+        # also reaps other clients whose 60s window has elapsed. `skip`'s
+        # entry was just written above and is always fresh, so it's never a
+        # candidate for eviction here.
+        expired = [
+            other
+            for other, window in self._windows.items()
+            if other != skip and now - window.started_at >= 60.0
+        ]
+        for other in expired:
+            del self._windows[other]
 
 
 class RequestMetrics:
     def __init__(self) -> None:
         self._requests: dict[tuple[str, str, int], int] = defaultdict(int)
         self._duration_seconds: dict[tuple[str, str], float] = defaultdict(
+            float
+        )
+        # HLD SS20.2: optimization-duration metric. Keyed by outcome
+        # (success/capacity_exceeded/deadline_exceeded/failed/cancelled/...)
+        # so slow-but-successful runs are distinguishable from runs that
+        # errored out quickly. Sum+count (not a true histogram) matches the
+        # sum-based convention already used for HTTP request duration above.
+        self._optimization_count: dict[str, int] = defaultdict(int)
+        self._optimization_duration_seconds: dict[str, float] = defaultdict(
             float
         )
         self._lock = Lock()
@@ -66,6 +92,13 @@ class RequestMetrics:
         with self._lock:
             self._requests[(method, route, status_code)] += 1
             self._duration_seconds[(method, route)] += duration_s
+
+    def record_optimization_duration(
+        self, outcome: str, duration_s: float
+    ) -> None:
+        with self._lock:
+            self._optimization_count[outcome] += 1
+            self._optimization_duration_seconds[outcome] += duration_s
 
     def render(self) -> str:
         lines = [
@@ -94,7 +127,40 @@ class RequestMetrics:
                     "aeroroute_http_request_duration_seconds_sum"
                     f"{{{labels}}} {duration:.6f}"
                 )
+            lines.extend(
+                [
+                    "# HELP aeroroute_optimization_duration_seconds_sum Total optimization execution duration by outcome.",
+                    "# TYPE aeroroute_optimization_duration_seconds_sum counter",
+                ]
+            )
+            for outcome, duration in sorted(
+                self._optimization_duration_seconds.items()
+            ):
+                labels = _labels(outcome=outcome)
+                lines.append(
+                    "aeroroute_optimization_duration_seconds_sum"
+                    f"{{{labels}}} {duration:.6f}"
+                )
+            lines.extend(
+                [
+                    "# HELP aeroroute_optimization_duration_seconds_count Optimization executions by outcome.",
+                    "# TYPE aeroroute_optimization_duration_seconds_count counter",
+                ]
+            )
+            for outcome, count in sorted(self._optimization_count.items()):
+                labels = _labels(outcome=outcome)
+                lines.append(
+                    "aeroroute_optimization_duration_seconds_count"
+                    f"{{{labels}}} {count}"
+                )
         return "\n".join(lines) + "\n"
+
+
+# Process-lifetime singleton shared between the HTTP middleware (main.py)
+# and any router that wants to record additional application-level metrics
+# (e.g. optimizations.py's optimization-duration recording) without a
+# circular import back to main.py.
+metrics = RequestMetrics()
 
 
 def log_request(
