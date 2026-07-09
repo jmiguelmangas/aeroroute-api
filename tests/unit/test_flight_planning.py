@@ -14,8 +14,10 @@ from aeroroute_api.infrastructure.navigation.airac import AiracRunway
 class FakeNavigation:
     def __init__(self, lengths: dict[str, float]) -> None:
         self.lengths = lengths
+        self.runway_calls: list[str] = []
 
     async def runways(self, airport: str) -> tuple[AiracRunway, ...]:
+        self.runway_calls.append(airport.upper())
         length = self.lengths.get(airport.upper())
         if length is None:
             return ()
@@ -87,6 +89,42 @@ def test_selects_compatible_alternate_and_builds_fuel_plan() -> None:
     )
     assert result.fuel_plan.block_fuel_kg > result.winner.fuel_kg  # type: ignore[union-attr]
     assert not result.fuel_plan.operationally_approved
+
+
+def test_include_diversions_false_skips_diversion_audits() -> None:
+    request = OptimizationRequest(
+        origin_icao="LEMD",
+        destination_icao="KJFK",
+        aircraft_type="B77W",
+        extra_fuel_kg=1_000,
+    )
+    catalogue = [
+        airport("KBOS", "Boston Logan", 42.3656, -71.0096),
+        airport("KPHL", "Philadelphia", 39.8729, -75.2437),
+        airport("CYQX", "Gander", 48.9369, -54.5681),
+    ]
+    navigation = FakeNavigation({"KBOS": 10_083, "KPHL": 9_500, "CYQX": 10_200})
+
+    result = asyncio.run(
+        add_preoperational_planning(
+            response(request),
+            catalogue,
+            navigation,  # type: ignore[arg-type]
+            include_diversions=False,
+        )
+    )
+
+    # The destination alternate (needed for fuel-plan convergence) is still
+    # computed -- only the diversion-candidate audits are skipped.
+    assert result.destination_alternate is not None
+    assert result.fuel_plan is not None
+    assert result.enroute_diversions == []
+    assert "ENROUTE_DIVERSIONS_UNAVAILABLE" not in {
+        flag.code for flag in result.data_quality
+    }
+    # CYQX is a diversion candidate, not the selected alternate (KPHL) --
+    # with diversions skipped, it must never be audited.
+    assert "CYQX" not in navigation.runway_calls
 
 
 def test_retains_requested_incompatible_alternate_as_degraded() -> None:

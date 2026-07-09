@@ -253,8 +253,15 @@ async def create_optimization(
         for mass_iterations in range(1, 4):
             response = await _execution_guard.run(lambda: execute(reserve_mass))
             response = response.model_copy(update={"request": request})
+            # Diversions are irrelevant to convergence (only fuel_plan is,
+            # via takeoff/trip fuel below) and get recomputed fresh by the
+            # unconditional call after this loop anyway, so skip auditing
+            # them on every mass iteration.
             response = await add_preoperational_planning(
-                response, catalogue, _navigation_client
+                response,
+                catalogue,
+                _navigation_client,
+                include_diversions=False,
             )
             if response.fuel_plan is None:
                 break

@@ -44,7 +44,20 @@ async def add_preoperational_planning(
     response: OptimizationResponse,
     airports: Sequence[AirportRecord],
     navigation: AiracNavigationClient,
+    *,
+    include_diversions: bool = True,
 ) -> OptimizationResponse:
+    """Compute the destination alternate, fuel plan, and (optionally)
+    en-route diversions for a candidate result.
+
+    ``include_diversions=False`` skips the diversion-candidate AIRAC audits
+    entirely. Diversions never feed the mass/fuel convergence loop that
+    calls this function repeatedly while narrowing reserve_mass_kg -- only
+    fuel_plan does, via takeoff_fuel_kg/trip_fuel_kg -- so computing them on
+    every iteration was pure waste: whatever this function returns mid-loop
+    is discarded once the loop converges and calls it one final time with
+    include_diversions=True (the default) for the response actually served.
+    """
     request = response.request
     winner = response.winner
     if request is None or winner is None or len(winner.geometry) < 2:
@@ -218,28 +231,30 @@ async def add_preoperational_planning(
             ),
         ],
     )
-    diversions = await _select_diversions(
-        candidates,
-        winner.geometry,
-        navigation,
-        planning.minimum_runway_length_ft,
-        excluded={
-            origin_code,
-            destination_code,
-            alternate.icao_code.upper() if alternate is not None else "",
-        },
-    )
-    if not diversions:
-        quality.append(
-            DataQualityFlag(
-                code="ENROUTE_DIVERSIONS_UNAVAILABLE",
-                severity="warning",
-                message=(
-                    "No runway-compatible en-route diversion candidate was "
-                    "found within 750 NM of the modeled route."
-                ),
-            )
+    diversions: list[EnrouteDiversion] = []
+    if include_diversions:
+        diversions = await _select_diversions(
+            candidates,
+            winner.geometry,
+            navigation,
+            planning.minimum_runway_length_ft,
+            excluded={
+                origin_code,
+                destination_code,
+                alternate.icao_code.upper() if alternate is not None else "",
+            },
         )
+        if not diversions:
+            quality.append(
+                DataQualityFlag(
+                    code="ENROUTE_DIVERSIONS_UNAVAILABLE",
+                    severity="warning",
+                    message=(
+                        "No runway-compatible en-route diversion candidate "
+                        "was found within 750 NM of the modeled route."
+                    ),
+                )
+            )
     return response.model_copy(
         update={
             "fuel_plan": fuel_plan,
