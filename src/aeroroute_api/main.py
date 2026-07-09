@@ -63,6 +63,7 @@ app.include_router(weather_router)
 async def request_id(request: Request, call_next) -> Response:
     started_at = monotonic()
     identifier = request.headers.get("X-Request-ID", str(uuid4()))
+    request.state.request_id = identifier
     client = request.client.host if request.client else "unknown"
     exempt = request.url.path in {"/health", "/health/providers", "/metrics"}
     content_length = int(request.headers.get("content-length", "0"))

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from uuid import UUID
 
 import httpx
@@ -52,6 +53,8 @@ from aeroroute_api.infrastructure.navigation.airac import (
     AiracNavigationClient,
     AiracProviderError,
 )
+
+logger = logging.getLogger("aeroroute.errors")
 
 router = APIRouter(prefix="/api/v1/optimizations", tags=["optimizations"])
 _limits = settings()
@@ -326,6 +329,14 @@ async def create_optimization(
                     "mass profile; reduce payload or extra fuel."
                 ),
             ) from error
+        logger.error(
+            "optimization_failed run_id=%s exception=%s.%s message=%s",
+            run.id,
+            type(error).__module__,
+            type(error).__qualname__,
+            str(error),
+            exc_info=error,
+        )
         await fail_optimization_run(session, run.id, "optimization_failed")
         raise PublicAPIError(
             503,
@@ -333,6 +344,14 @@ async def create_optimization(
             "The optimization could not be completed.",
         ) from error
     except Exception as error:
+        logger.error(
+            "optimization_failed run_id=%s exception=%s.%s message=%s",
+            run.id,
+            type(error).__module__,
+            type(error).__qualname__,
+            str(error),
+            exc_info=error,
+        )
         await fail_optimization_run(session, run.id, "optimization_failed")
         raise PublicAPIError(
             503,

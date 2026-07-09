@@ -24,6 +24,14 @@ from aeroroute_api.infrastructure.db.models import (
 
 REQUEST_HASH_VERSION = "optimization-v5-segmented-terminal"
 
+# A "running" row this old was almost certainly orphaned by a process crash
+# or kill, not a genuinely slow request (the execution guard's own deadline
+# is 15s per solve attempt, times at most 3 mass-iteration attempts, plus
+# AIRAC enrichment -- this is a generous multiple of that worst case).
+# Without this, a crashed run's exact request hash returns 409
+# "already running" forever, with no recovery path.
+STALE_RUNNING_AFTER_S = 600.0
+
 
 @dataclass(frozen=True, slots=True)
 class RunReservation:
@@ -53,7 +61,12 @@ async def reserve_optimization_run(
         )
     )
     if existing is not None:
-        if existing.status == "failed":
+        stale_running = (
+            existing.status == "running"
+            and (datetime.now(UTC) - existing.updated_at).total_seconds()
+            > STALE_RUNNING_AFTER_S
+        )
+        if existing.status == "failed" or stale_running:
             existing.status = "running"
             existing.error_code = None
             existing.completed_at = None
