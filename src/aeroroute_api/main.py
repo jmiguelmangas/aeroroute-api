@@ -9,6 +9,7 @@ from aeroroute_api.api.routers.airports import router as airports_router
 from aeroroute_api.api.routers.data_sources import (
     router as data_sources_router,
 )
+from aeroroute_api.api.routers.dispatch import router as dispatch_router
 from aeroroute_api.api.routers.explanations import router as explanations_router
 from aeroroute_api.api.routers.flight_plans import router as flight_plans_router
 from aeroroute_api.api.routers.icao_fpl import router as icao_fpl_router
@@ -29,7 +30,7 @@ from aeroroute_api.api.observability import (
 )
 from aeroroute_api.config import settings
 
-app = FastAPI(title="AeroRoute MLX API", version="0.10.0")
+app = FastAPI(title="AeroRoute MLX API", version="0.11.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings().cors_allow_origins),
@@ -42,6 +43,7 @@ _metrics = RequestMetrics()
 _rate_limiter = FixedWindowRateLimiter(_settings.rate_limit_per_minute)
 app.include_router(airports_router)
 app.include_router(data_sources_router)
+app.include_router(dispatch_router)
 app.include_router(explanations_router)
 app.include_router(flight_plans_router)
 app.include_router(icao_fpl_router)
